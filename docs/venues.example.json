@@ -1,0 +1,48 @@
+{
+  "venues": [
+    {
+      "id": "v_replace",
+      "slug": "replace-with-venue-slug",
+      "name": "Replace with approved venue name",
+      "city": "Round Rock, TX",
+      "description": "Replace with the venue's approved public description.",
+      "address": "Replace with the real public address",
+      "timezone": "America/Chicago",
+      "terms": "Replace with the venue's approved fixed-term membership, storage, booking, arrival, cancellation, no-show and refund terms. Drinks and gratuity are separate unless explicitly included.",
+      "approved": false,
+      "demo": false,
+      "graceMinutes": 15,
+      "priorityEnabled": false,
+      "priorityBaseCents": 2500,
+      "staff": [
+        { "phone": "+12025550100", "name": "Replace with approved manager", "role": "manager" }
+      ],
+      "lockers": [
+        { "label": "L01", "mode": "shared", "positions": 2 },
+        { "label": "L02", "mode": "shared", "positions": 2 },
+        { "label": "L03", "mode": "shared", "positions": 2 },
+        { "label": "L04", "mode": "shared", "positions": 2 },
+        { "label": "L05", "mode": "shared", "positions": 2 },
+        { "label": "L06", "mode": "shared", "positions": 2 },
+        { "label": "L07", "mode": "shared", "positions": 2 },
+        { "label": "L08", "mode": "shared", "positions": 2 },
+        { "label": "L09", "mode": "private", "positions": 1 },
+        { "label": "L10", "mode": "private", "positions": 1 },
+        { "label": "L11", "mode": "private", "positions": 1 },
+        { "label": "L12", "mode": "private", "positions": 1 }
+      ],
+      "plans": [
+        { "key": "guest", "name": "Guest pass", "mode": null, "priceCents": 0, "durationDays": 365, "benefits": ["Venue pass", "Booking access", "No locker included"] },
+        { "key": "shared", "name": "Shared locker", "mode": "shared", "priceCents": 6900, "durationDays": 30, "benefits": ["One named shared position", "Recorded bottle balance", "Seating purchased separately"] },
+        { "key": "private", "name": "Private locker", "mode": "private", "priceCents": 9900, "durationDays": 30, "benefits": ["One whole locker", "Recorded bottle balance", "Seating purchased separately"] }
+      ],
+      "resources": [
+        { "label": "Table 1", "kind": "table", "capacity": 4 },
+        { "label": "Table 2", "kind": "table", "capacity": 4 },
+        { "label": "Bar seat 1", "kind": "stool", "capacity": 1 },
+        { "label": "Bar seat 2", "kind": "stool", "capacity": 1 }
+      ],
+      "games": []
+    }
+  ]
+}
