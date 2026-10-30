@@ -4,9 +4,13 @@ Prepared October 15, 2026; repository references updated October 16, 2026. The a
 
 ## Vercel preparation — October 30, 2026
 
-Vercel project `regulars-app` and Neon database `regulars-pilot-db` are provisioned and linked for preview/production. The new adapter uses PostgreSQL and request-scoped pools, authenticated cron, and durable job leases. Local demo remains localhost-only. Preview requires Stripe test credentials; missing configuration returns 503 without enabling demo authentication.
+Vercel project `regulars-app` and Neon database `regulars-pilot-db` are provisioned and linked for preview/production. The new adapter uses PostgreSQL and request-scoped pools, authenticated cron, and durable job leases. Local demo remains localhost-only. Live-provider preview requires Stripe test credentials; missing configuration returns 503. An explicitly enabled, Vercel-authenticated synthetic preview now supports testing without provider accounts in a separate regulars_pilot schema.
 
 Local test evidence covers SQLite and embedded PostgreSQL. Real Neon concurrent workers, Vercel raw webhook forwarding, cron execution, SMS receipt, real Stripe sandbox delivery and native Wallet devices still require hosted verification. Stripe/Twilio credentials and operator-reviewed venue configuration are absent; full live deployment remains blocked. See [Vercel setup](VERCEL.md).
+
+## Synthetic hosted pilot — October 30, 2026
+
+The protected preview now runs guest/manager fixtures, simulated checkout and refunds, and persistent Neon transactions. Hosted browser testing covered discovery, memberships, season reservations, resource exclusion, queues, bottle service, role denial, inquiry and promotion approval. Narrow-phone navigation, search counts and pass dates were corrected. Both database test suites pass 57 tests. This does not verify real payments, SMS or native Wallet delivery. Square is not implemented; the existing payment adapter is Stripe. See [pilot test report](PILOT_TEST_REPORT_2026-10-30.md).
 
 ## Implemented and exercised locally
 
@@ -36,7 +40,7 @@ Run `npm run check` and `npm test` for current results. The final build records 
 - Apple certificate trust, iPhone installation, APNs connection and device refresh.
 - Google issuer/class permissions, Android saving and remote object updates.
 - Live host/TLS configuration, backups/restore, payment reconciliation and staff rehearsal.
-- Browser visual/accessibility/device QA. Browser control was unavailable, so UI source and HTTP flows were checked without screenshots or browser automation.
+- Full accessibility audit and real-device QA. Hosted Chromium browser workflows and responsive frame checks were completed October 30; see the pilot report.
 
 ## Not implemented in this release
 
