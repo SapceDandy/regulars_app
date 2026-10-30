@@ -14,3 +14,5 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
 .pilot-workbench{padding:24px;text-align:center}.pilot-workbench h1{font-size:32px}.pilot-workbench form{display:flex;justify-content:center;align-items:end;gap:16px;flex-wrap:wrap;margin-bottom:24px}.pilot-workbench label{text-align:left;margin:0}.pilot-workbench iframe{display:block;max-width:100%;margin:auto;border:1px solid var(--line);background:var(--paper)}
+
+@media(max-width:420px){.site-header{height:auto;padding:16px 20px;flex-wrap:wrap;gap:10px}.site-header>.wordmark{flex-shrink:0}.site-header nav{width:100%;justify-content:space-between;gap:12px}.site-header nav>a{display:inline-flex;align-items:center;min-height:44px;white-space:nowrap}.site-header nav>a:nth-child(2){display:none}.hero h1{font-size:clamp(42px,14vw,58px)}.game-card{flex-wrap:wrap}.game-main{min-width:140px}.game-price{width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left}.game-price b{margin:0}.game-price .btn{min-height:44px}}

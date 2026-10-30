@@ -38,3 +38,11 @@ Transactions use one PostgreSQL advisory lock to preserve the original inventory
 Vercel Cron runs only on production deployments, not previews. The configured per-minute schedule requires a supporting plan. Protect CRON_SECRET and inspect failed jobs through the manager interface. The frontend and webhook routes share one Node function with automatic body parsing disabled.
 
 Local `scripts/backup.js` is SQLite-only. Use Neon's managed backup/restore capabilities for hosted data and verify retention for the selected plan. Production rollback must use a deployment compatible with the current schema; no destructive schema migration is included here.
+
+## Synthetic UI/UX testing without provider accounts
+
+The owner authorized provider-free functionality and UI testing on October 30. Set PILOT_TESTING_ENABLED=true only on the codex/vercel-postgres-pilot preview branch, retain Vercel Authentication, and use its exact deployment URL. The runtime rejects this mode outside Vercel Preview. All provider requests are blocked; records use the separate regulars_pilot schema, with no public-schema fallback. Only reserved +1 202-555-0100 through 0199 phone numbers are accepted. No real patrons or transactions belong here.
+
+The login page provides Test guest, Second guest and Test manager personas. These are synthetic fixtures, not real authentication. Ordinary local demo code-entry tests remain in the automated suite; real SMS delivery remains unverified. Sample checkout buttons move no money. Test persona routes are absent outside the explicitly enabled pilot.
+
+`/pilot` provides a responsive frame at 320, 390, 768 and 1280 pixels for guest and staff screens. This checks browser layout, not actual iOS/Android devices. Synthetic jobs run after POST requests because Vercel does not schedule preview cron. Disable the preview flag before testing real provider credentials.
