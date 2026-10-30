@@ -8,6 +8,17 @@
       "includeFiles": "{apps/web/public/**,packages/db/*.sql}"
     }
   },
-  "rewrites": [{"source": "/(.*)", "destination": "/api/index"}],
-  "crons": [{"path": "/api/cron", "schedule": "* * * * *"}]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "* * * * *"
+    }
+  ],
+  "outputDirectory": "public"
 }
