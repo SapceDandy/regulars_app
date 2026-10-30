@@ -53,6 +53,19 @@ export async function createApplication({config=configuration(),store,now=()=>Da
       const user=(await auth.session(req.headers.cookie));const signedIn=()=>{requireThat(user,401,'Sign in with your phone to continue.');return user.id;};
       if(method==='GET'&&path==='/healthz')return send(200,{ok:true});
       if(method==='GET'&&path==='/api/config')return send(200,{mode:config.mode,pilot:!!config.pilot,wallets:wallets.readiness()});
+      if(config.pilot&&method==='GET'&&path==='/pilot') {
+        const width=[320,390,768,1280].includes(Number(url.searchParams.get('width')))?Number(url.searchParams.get('width')):390;
+        const page=['/','/venues','/v/copper-room','/login','/account','/staff/copper-room','/partners'].includes(url.searchParams.get('page'))?url.searchParams.get('page'):'/';
+        res.writeHead(200,{'content-type':'text/html; charset=utf-8'});
+        return res.end(`<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Regulars pilot viewport</title><link rel="stylesheet" href="/styles.css"></head><body><main class="pilot-workbench"><h1>Preview the experience</h1><p>Synthetic testing only. Choose a screen width and page; use the app inside the frame.</p><form><label>Screen width<select name="width">${[320,390,768,1280].map(w=>`<option value="${w}" ${w===width?'selected':''}>${w}px</option>`).join('')}</select></label><label>Page<select name="page">${['/','/venues','/v/copper-room','/login','/account','/staff/copper-room','/partners'].map(p=>`<option ${p===page?'selected':''}>${p}</option>`).join('')}</select></label><button class="btn">Show preview</button></form><iframe title="Regulars responsive preview" src="${escapeHtml(page)}" width="${width}" height="900"></iframe></main></body></html>`);
+      }
+      if(config.pilot&&method==='POST'&&path==='/api/pilot/session') {
+        const {role}=jsonBody(await readBody(req));requireThat(['guest','manager','second-guest'].includes(role),400,'Choose a test persona.');
+        const phone=role==='manager'?'+12025550100':role==='second-guest'?'+12025550102':'+12025550101';
+        const started=await auth.start({phone,smsConsent:true},ip);
+        const result=await auth.verify({phone,code:started.demoCode,name:role==='manager'?'Demo Manager':role==='guest'?'Pilot Guest':'Second Pilot Guest'},ip);
+        return send(200,{signedIn:true},{'set-cookie':auth.cookie(result.token)});
+      }
       if(method==='GET'&&path==='/api/venues')return send(200,(await app.catalog()));
       let match;
       if(method==='GET'&&(match=path.match(/^\/api\/venues\/([a-z0-9_-]+)$/)))return send(200,(await app.venuePage(match[1])));

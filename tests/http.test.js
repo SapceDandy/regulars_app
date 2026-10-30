@@ -55,3 +55,20 @@ test('static asset paths are allowlisted and a venue slug cannot traverse files'
 test('production refuses demo auth and live mode refuses missing providers or HTTP',()=>{
   assert.throws(()=>configuration({NODE_ENV:'production',APP_MODE:'demo'}),/Production cannot/);assert.throws(()=>configuration({APP_MODE:'live'}),/Configure/);assert.throws(()=>configuration({APP_MODE:'demo',HOST:'0.0.0.0'}),/localhost/);
 });
+
+test('pilot personas and viewport tools are unavailable unless the runtime is explicitly a pilot',async t=>{
+  const f=await serverFixture(t);
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',body:{role:'manager'}})).status,404);
+  assert.equal((await f.call('/pilot')).status,404);
+  f.config.pilot=true;
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',body:{role:'owner'}})).status,400);
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',origin:false,body:{role:'manager'}})).status,403);
+  const guest=await f.call('/api/pilot/session',{method:'POST',body:{role:'guest'}});
+  assert.equal(guest.status,200);const guestCookie=guest.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.call('/api/staff/copper-room',{cookie:guestCookie})).status,403);
+  const manager=await f.call('/api/pilot/session',{method:'POST',body:{role:'manager'}});
+  assert.equal(manager.status,200);const managerCookie=manager.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.call('/api/staff/copper-room',{cookie:managerCookie})).status,200);
+  const viewport=await f.call('/pilot?width=390&page=https://evil.example');
+  assert.match(viewport.data,/src="\/" width="390"/);assert.doesNotMatch(viewport.data,/evil.example/);
+});
