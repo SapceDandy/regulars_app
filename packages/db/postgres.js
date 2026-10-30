@@ -24,9 +24,21 @@ export function postgresSql(sql) {
   return result;
 }
 
-export function createPostgresStore(pool) {
+export function createPostgresStore(pool, {schema='public'}={}) {
+  if(!['public','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
   const context = new AsyncLocalStorage();
-  const query = (sql, values = []) => (context.getStore() ?? pool).query(postgresSql(sql), values);
+  const query = async (sql, values = []) => {
+    if(context.getStore())return context.getStore().query(postgresSql(sql),values);
+    if(schema==='public')return pool.query(postgresSql(sql),values);
+    const client=await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL search_path TO regulars_pilot');
+      const result=await client.query(postgresSql(sql),values);
+      await client.query('COMMIT');return result;
+    } catch(error) {await client.query('ROLLBACK').catch(()=>{});throw error;}
+    finally {client.release();}
+  };
   const store = {
     dialect: 'postgres',
     get: async (sql, ...values) => (await query(sql, values)).rows[0],
@@ -37,6 +49,7 @@ export function createPostgresStore(pool) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        if(schema==='regulars_pilot')await client.query('SET LOCAL search_path TO regulars_pilot');
         await client.query("SET LOCAL lock_timeout = '15s'");
         await client.query("SET LOCAL statement_timeout = '20s'");
         // Preserve SQLite's single-writer allocation semantics across all Vercel instances.
@@ -52,6 +65,7 @@ export function createPostgresStore(pool) {
     },
     async migrate() {
       await store.transaction(async () => {
+        if(schema==='regulars_pilot')await context.getStore().query('CREATE SCHEMA IF NOT EXISTS regulars_pilot');
         await context.getStore().query(readFileSync(new URL('./schema.postgres.sql', import.meta.url), 'utf8'));
       });
     },
@@ -60,9 +74,10 @@ export function createPostgresStore(pool) {
   return store;
 }
 
-export function openPostgresStore(connectionString) {
+export function openPostgresStore(connectionString, {schema='public'}={}) {
   if (!connectionString) throw new Error('Configure DATABASE_URL before opening PostgreSQL');
+  if(!['public','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
   const pool = new Pool({connectionString, max: 4, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 10_000});
   pool.on('error', () => console.error('PostgreSQL connection failed'));
-  return createPostgresStore(pool);
+  return createPostgresStore(pool,{schema});
 }

@@ -19,6 +19,7 @@ export class Auth {
   }
   async start(input,ip) {
     const p=phone(input.phone);requireThat(input.smsConsent===true,400,'Agree to receive a sign-in code by text.');
+    requireThat(!this.config.pilot||/^\+120255501\d{2}$/.test(p),400,'Use a synthetic pilot number: +1 202-555-0101 through +1 202-555-0199 (manager: +1 202-555-0100).');
     (await this.limit(`send:ip:${ip}`,15,60*60_000));(await this.limit(`send:phone:${p}`,4,60*60_000));
     const current=(await this.s.get('SELECT expires_at FROM challenges WHERE phone=?',p));
     requireThat(!current||current.expires_at-this.now()<9*60_000,429,'Wait one minute before requesting another code.');

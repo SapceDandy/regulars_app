@@ -52,7 +52,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
       if(method==='OPTIONS')return send(405,{error:'Cross-origin API calls are not supported.'});
       const user=(await auth.session(req.headers.cookie));const signedIn=()=>{requireThat(user,401,'Sign in with your phone to continue.');return user.id;};
       if(method==='GET'&&path==='/healthz')return send(200,{ok:true});
-      if(method==='GET'&&path==='/api/config')return send(200,{mode:config.mode,wallets:wallets.readiness()});
+      if(method==='GET'&&path==='/api/config')return send(200,{mode:config.mode,pilot:!!config.pilot,wallets:wallets.readiness()});
       if(method==='GET'&&path==='/api/venues')return send(200,(await app.catalog()));
       let match;
       if(method==='GET'&&(match=path.match(/^\/api\/venues\/([a-z0-9_-]+)$/)))return send(200,(await app.venuePage(match[1])));

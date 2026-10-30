@@ -4,6 +4,10 @@ import { createPostgresStore } from '../../packages/db/postgres.js';
 
 export async function testStore(path = ':memory:') {
   if (process.env.REGULARS_TEST_DB !== 'postgres' || path !== ':memory:') return openStore(path);
+  return postgresTestStore();
+}
+
+export async function postgresTestStore(schema='public') {
   const db = new PGlite();
   let queue = Promise.resolve();
   const acquire = async () => {
@@ -20,7 +24,7 @@ export async function testStore(path = ':memory:') {
     async connect() {const release=await acquire();return {query,release};},
     end: () => db.close()
   };
-  const store = createPostgresStore(pool);
+  const store = createPostgresStore(pool,{schema});
   await store.migrate();
   return store;
 }

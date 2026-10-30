@@ -8,7 +8,7 @@ Never grant a paid entitlement from a success redirect, phone number alone, a st
 
 Access must be checked against the actual record's venue. Staff roles are provisioned by the operator, never from a client payload. Every stock adjustment retains actor, time, delta and reason. Positive stock corrections need a manager. Pass codes identify records; they are not public bearer authorization to read member details or serve alcohol.
 
-Demo mode is local only, uses synthetic records, displays development codes and simulates payments. Production refuses demo mode. Never commit phone data, databases, provider keys, certificates or real transaction payloads. Do not introduce live claims, real partner venues, fabricated testimonials, automatic drinks rewards, wagering or unapproved messaging.
+Demo mode is local only, uses synthetic records, displays development codes and simulates payments. Production refuses demo mode. The owner-authorized synthetic pilot may run only in an explicitly enabled Vercel Preview, with Vercel Authentication, a separate regulars_pilot database schema, reserved fake phone numbers, provider requests blocked, and a visible test banner. Never commit phone data, databases, provider keys, certificates or real transaction payloads. Do not introduce live claims, real partner venues, fabricated testimonials, automatic drinks rewards, wagering or unapproved messaging.
 
 Fixed membership terms, manual renewal, illustrative prices, price tiers, priority capacity and seed inventory are implementation defaults for review. They are not validated commercial commitments. Venue staff handle physical service, ID checks and exceptions.
 
