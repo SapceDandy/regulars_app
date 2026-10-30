@@ -6,7 +6,10 @@
 - `npm run test:postgres`: **53 passed, 0 failed, 0 skipped**, embedded PostgreSQL (PGlite). The existing disk-based cross-process race test still uses SQLite; PGlite serializes its single connection. Hosted Neon multi-instance contention remains unverified.
 - `npm audit --omit=dev`: **0 reported vulnerabilities** after updating ws to 8.22.0.
 - Added coverage for async transaction rollback, competing allocations, concurrent job claiming and stale lease recovery, authenticated cron, invocation connection cleanup, safe startup failure, and Vercel IP trust.
-- Vercel project and Neon integration created; provider credentials and approved venue configuration are still needed. This evidence does not establish a functioning hosted pilot.
+- Vercel project and Neon integration created; separate session and cron secrets configured for preview and production.
+- Protected preview deployment `dpl_Ae4Fef91A1JW1EYHV4bZDUAjwx1T` reached READY at commit `d5280c7d165ca101554258fd31392374205b4b7c`. Its `/healthz` returned HTTP 503 with the expected readiness message; provider credentials and approved venue configuration are missing.
+- Hosted `/api/cron` returned `{"error":"Unauthorized"}` in the authenticated browser without a cron bearer token. The fetch connector classified its 401 as deployment authentication, so browser inspection confirmed the application response.
+- No Neon schema initialization or application transaction has yet run: configuration validation fails before opening the pool. A successful build is not a functioning hosted pilot.
 
 ## Prior baseline
 
