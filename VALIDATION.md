@@ -1,4 +1,15 @@
-# Validation — October 15, 2026
+# Validation — October 30, 2026
+
+- Runtime: Node.js 24.22.1.
+- `npm run check`: passed, JavaScript syntax and JSON validation.
+- `npm test`: **53 passed, 0 failed, 0 skipped**, SQLite.
+- `npm run test:postgres`: **53 passed, 0 failed, 0 skipped**, embedded PostgreSQL (PGlite). The existing disk-based cross-process race test still uses SQLite; PGlite serializes its single connection. Hosted Neon multi-instance contention remains unverified.
+- `npm audit --omit=dev`: **0 reported vulnerabilities** after updating ws to 8.22.0.
+- Added coverage for async transaction rollback, competing allocations, concurrent job claiming and stale lease recovery, authenticated cron, invocation connection cleanup, safe startup failure, and Vercel IP trust.
+- Vercel project and Neon integration created; provider credentials and approved venue configuration are still needed. This evidence does not establish a functioning hosted pilot.
+
+## Prior baseline
+
 
 - Runtime: Node.js 24.19.0; built-in SQLite 3.53.3.
 - `npm run check`: passed; syntax checked for 22 JavaScript files, plus all JSON parsed.

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApplication } from '../apps/web/server.js';
 import { configuration } from '../apps/web/config.js';
-import { openStore } from '../packages/db/store.js';
+import { testStore } from './helpers/store.js';
 
 async function serverFixture(t) {
-  const config=configuration({APP_MODE:'demo',PUBLIC_ORIGIN:'http://127.0.0.1:3000'});const store=openStore();const r=createApplication({config,store});await new Promise(resolve=>r.server.listen(0,'127.0.0.1',resolve));config.origin=`http://127.0.0.1:${r.server.address().port}`;
-  t.after(async()=>{r.server.closeAllConnections();await new Promise(resolve=>r.server.close(resolve));store.close();});
+  const config=configuration({APP_MODE:'demo',PUBLIC_ORIGIN:'http://127.0.0.1:3000'});const store=await testStore();const r=(await createApplication({config,store}));await new Promise(resolve=>r.server.listen(0,'127.0.0.1',resolve));config.origin=`http://127.0.0.1:${r.server.address().port}`;
+  t.after(async()=>{r.server.closeAllConnections();await new Promise(resolve=>r.server.close(resolve));(await store.close());});
   const call=async(path,{method='GET',body,cookie,origin=true,key}={})=>{
     const response=await fetch(config.origin+path,{method,headers:{...(origin?{origin:config.origin}:{}),...(method!=='GET'?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{}),...(key?{'idempotency-key':key}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});const content=response.headers.get('content-type')??'';return {status:response.status,headers:response.headers,data:content.includes('json')?await response.json():await response.text()};
   };
@@ -24,7 +24,7 @@ test('SMS consent, code expiry, attempt limits and one-time consumption are enfo
   const p2='+12025550112';const sent=await f.call('/api/auth/start',{method:'POST',body:{phone:p2,smsConsent:true}});for(let i=0;i<5;i++)assert.equal((await f.call('/api/auth/verify',{method:'POST',body:{phone:p2,code:'000000'}})).status,401);assert.equal((await f.call('/api/auth/verify',{method:'POST',body:{phone:p2,code:sent.data.demoCode}})).status,401);
 });
 test('origin checks prevent cross-site writes even with a valid session cookie',async t=>{
-  const f=await serverFixture(t);const cookie=await f.login();assert.equal((await f.call('/api/memberships/guest',{method:'POST',origin:false,cookie,body:{venueId:'v_copper',planId:'v_copper_guest'}})).status,403);assert.equal(f.store.get('SELECT count(*) n FROM memberships').n,0);
+  const f=await serverFixture(t);const cookie=await f.login();assert.equal((await f.call('/api/memberships/guest',{method:'POST',origin:false,cookie,body:{venueId:'v_copper',planId:'v_copper_guest'}})).status,403);assert.equal((await f.store.get('SELECT count(*) n FROM memberships')).n,0);
 });
 test('full guest journey: sign in, buy, see booking, add guest pass, logout',async t=>{
   const f=await serverFixture(t);const cookie=await f.login();const venue=(await f.call('/api/venues/copper-room')).data;const body={venueId:venue.venue.id,kind:'ticket',resourceId:venue.resources[0].id,eventId:venue.events[0].id,partySize:1};

@@ -11,7 +11,8 @@ export function configuration(env = process.env) {
   const host=env.HOST??'127.0.0.1';
   requireThat(mode!=='demo'||(['127.0.0.1','localhost','::1'].includes(host)&&['localhost','127.0.0.1','[::1]'].includes(new URL(origin).hostname)),500,'Demo mode is restricted to localhost.');
   if(mode==='live') {
-    for(const key of ['SESSION_SECRET','TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_VERIFY_SERVICE_SID','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','VENUE_CONFIG_PATH']) requireThat(!!env[key],500,`Configure ${key} before live startup.`);
+    for(const key of ['SESSION_SECRET','TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_VERIFY_SERVICE_SID','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET']) requireThat(!!env[key],500,`Configure ${key} before live startup.`);
+    requireThat(!!(env.VENUE_CONFIG_PATH||env.VENUE_CONFIG_JSON),500,'Configure VENUE_CONFIG_PATH or VENUE_CONFIG_JSON before live startup.');
     requireThat(env.SESSION_SECRET.length>=32&&origin.startsWith('https://'),500,'Live mode needs HTTPS and a 32+ character session secret.');
   }
   const embedOrigins=(env.EMBED_ORIGINS??'').split(',').filter(Boolean).map(v=>new URL(v.trim()).origin);
@@ -21,6 +22,11 @@ export function configuration(env = process.env) {
 }
 export function clientAddress(req,config) {
   const remote=req.socket.remoteAddress??'unknown';
+  if(config.env?.VERCEL==='1') {
+    // Vercel overwrites this header at its trusted ingress.
+    const candidate=String(req.headers['x-vercel-forwarded-for']??'').trim();
+    return isIP(candidate)>0?candidate:remote;
+  }
   if(!config.trustedProxyIps?.includes(remote))return remote;
   // Trust only the closest explicitly configured proxy. It must append/overwrite the actual client IP.
   const candidate=String(req.headers['x-forwarded-for']??'').split(',').at(-1).trim();return isIP(candidate)>0?candidate:remote;

@@ -34,15 +34,15 @@ export class Wallets {
   readiness() {
     const e=this.config.env;return {apple:this.config.mode==='live'&&['APPLE_PASS_TYPE_ID','APPLE_TEAM_ID','APPLE_CERT_PATH','APPLE_KEY_PATH','APPLE_WWDR_PATH'].every(k=>!!e[k]),google:this.config.mode==='live'&&['GOOGLE_ISSUER_ID','GOOGLE_CLASS_ID','GOOGLE_SERVICE_ACCOUNT_EMAIL','GOOGLE_PRIVATE_KEY_PATH'].every(k=>!!e[k])};
   }
-  next(member) {return this.s.get("SELECT e.title,r.starts_at,s.label resource_label FROM reservations r JOIN orders o ON o.id=r.order_id JOIN events e ON e.id=r.event_id JOIN resources s ON s.id=r.resource_id WHERE o.user_id=? AND o.venue_id=? AND r.state IN('confirmed','attended') AND r.ends_at>? ORDER BY r.starts_at LIMIT 1",member.user_id,member.venue_id,this.app.now());}
-  assertOwner(userId,mid) {const m=this.s.get('SELECT * FROM memberships WHERE id=? AND user_id=?',mid,userId);requireThat(m,404,'Pass not found.');return m;}
-  authorizeApple(mid,header) {
-    const m=this.s.get('SELECT * FROM memberships WHERE id=?',mid);requireThat(m&&equal(header,`ApplePass ${m.pass_auth}`),401,'Invalid pass authorization.');return m;
+  async next(member) {return (await this.s.get("SELECT e.title,r.starts_at,s.label resource_label FROM reservations r JOIN orders o ON o.id=r.order_id JOIN events e ON e.id=r.event_id JOIN resources s ON s.id=r.resource_id WHERE o.user_id=? AND o.venue_id=? AND r.state IN('confirmed','attended') AND r.ends_at>? ORDER BY r.starts_at LIMIT 1",member.user_id,member.venue_id,this.app.now()));}
+  async assertOwner(userId,mid) {const m=(await this.s.get('SELECT * FROM memberships WHERE id=? AND user_id=?',mid,userId));requireThat(m,404,'Pass not found.');return m;}
+  async authorizeApple(mid,header) {
+    const m=(await this.s.get('SELECT * FROM memberships WHERE id=?',mid));requireThat(m&&equal(header,`ApplePass ${m.pass_auth}`),401,'Invalid pass authorization.');return m;
   }
-  apple(mid) {
+  async apple(mid) {
     requireThat(this.readiness().apple,503,'Apple Wallet needs the pass certificate and HTTPS setup.');
-    const m=this.app.membershipSnapshot(mid);const secret=this.s.get('SELECT pass_auth FROM memberships WHERE id=?',mid).pass_auth;
-    const files={'pass.json':Buffer.from(JSON.stringify(appleDocument(m,secret,this.config,this.next(m)))),'icon.png':readFileSync(new URL('../../apps/web/public/assets/icon.png',import.meta.url)),'icon@2x.png':readFileSync(new URL('../../apps/web/public/assets/icon@2x.png',import.meta.url)),'icon@3x.png':readFileSync(new URL('../../apps/web/public/assets/icon@3x.png',import.meta.url))};
+    const m=(await this.app.membershipSnapshot(mid));const secret=(await this.s.get('SELECT pass_auth FROM memberships WHERE id=?',mid)).pass_auth;
+    const files={'pass.json':Buffer.from(JSON.stringify(appleDocument(m,secret,this.config,(await this.next(m))))),'icon.png':readFileSync(new URL('../../apps/web/public/assets/icon.png',import.meta.url)),'icon@2x.png':readFileSync(new URL('../../apps/web/public/assets/icon@2x.png',import.meta.url)),'icon@3x.png':readFileSync(new URL('../../apps/web/public/assets/icon@3x.png',import.meta.url))};
     const manifest=Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(files).map(([name,data])=>[name,createHash('sha1').update(data).digest('hex')]))));
     const temp=mkdtempSync(join(tmpdir(),'regulars-pass-'));const e=this.config.env;
     try {
@@ -52,13 +52,13 @@ export class Wallets {
       files['manifest.json']=manifest;files.signature=readFileSync(join(temp,'signature'));return zip(files);
     } finally {rmSync(temp,{recursive:true,force:true});}
   }
-  google(mid) {
+  async google(mid) {
     requireThat(this.readiness().google,503,'Google Wallet needs an issuer, class and service account.');
-    const e=this.config.env;const m=this.app.membershipSnapshot(mid);
-    const token=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,aud:'google',typ:'savetowallet',iat:Math.floor(this.app.now()/1000),origins:[this.config.origin],payload:{genericObjects:[googleDocument(m,this.config,this.next(m))]}},readFileSync(e.GOOGLE_PRIVATE_KEY_PATH));
+    const e=this.config.env;const m=(await this.app.membershipSnapshot(mid));
+    const token=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,aud:'google',typ:'savetowallet',iat:Math.floor(this.app.now()/1000),origins:[this.config.origin],payload:{genericObjects:[googleDocument(m,this.config,(await this.next(m)))]}},readFileSync(e.GOOGLE_PRIVATE_KEY_PATH));
     return `https://pay.google.com/gp/v/save/${token}`;
   }
-  register(device,mid,pushToken) {requireThat(device.length<=256&&typeof pushToken==='string'&&/^[A-Fa-f0-9]{32,512}$/.test(pushToken),400,'Invalid device registration.');const old=this.s.get('SELECT device_id FROM apple_registrations WHERE device_id=? AND membership_id=?',device,mid);this.s.run('INSERT INTO apple_registrations VALUES(?,?,?) ON CONFLICT(device_id,membership_id) DO UPDATE SET push_token=excluded.push_token',device,mid,pushToken);return old?200:201;}
+  async register(device,mid,pushToken) {requireThat(device.length<=256&&typeof pushToken==='string'&&/^[A-Fa-f0-9]{32,512}$/.test(pushToken),400,'Invalid device registration.');const old=(await this.s.get('SELECT device_id FROM apple_registrations WHERE device_id=? AND membership_id=?',device,mid));(await this.s.run('INSERT INTO apple_registrations VALUES(?,?,?) ON CONFLICT(device_id,membership_id) DO UPDATE SET push_token=excluded.push_token',device,mid,pushToken));return old?200:201;}
   async googleAccess() {
     if(this.access&&this.access.expires>Date.now())return this.access.token;
     const e=this.config.env;const now=Math.floor(Date.now()/1000);
@@ -66,7 +66,7 @@ export class Wallets {
     const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});const data=await response.json();this.access={token:data.access_token,expires:Date.now()+Math.max(0,data.expires_in-60)*1000};return this.access.token;
   }
   async updateGoogle(mid) {
-    const m=this.app.membershipSnapshot(mid);const body=googleDocument(m,this.config,this.next(m));const access=await this.googleAccess();
+    const m=(await this.app.membershipSnapshot(mid));const body=googleDocument(m,this.config,(await this.next(m)));const access=await this.googleAccess();
     const url=`https://walletobjects.googleapis.com/walletobjects/v1/genericObject/${encodeURIComponent(body.id)}`;
     let res=await fetch(url,{method:'PATCH',headers:{authorization:`Bearer ${access}`,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12_000)});
     if(res.status===404) res=await fetch('https://walletobjects.googleapis.com/walletobjects/v1/genericObject',{method:'POST',headers:{authorization:`Bearer ${access}`,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12_000)});
@@ -76,17 +76,18 @@ export class Wallets {
     const e=this.config.env;
     return new Promise((resolve,reject)=>{
       const session=connect('https://api.push.apple.com',{cert:readFileSync(e.APPLE_CERT_PATH),key:readFileSync(e.APPLE_KEY_PATH)});
-      let done=false;const finish=(error)=>{if(done)return;done=true;session.close();error?reject(error):resolve();};
+      let done=false,removing=false;const finish=(error)=>{if(done)return;done=true;session.close();error?reject(error):resolve();};
       session.setTimeout(12_000,()=>finish(new Problem(502,'Apple update timed out.')));session.on('error',finish);
       const req=session.request({':method':'POST',':path':`/3/device/${token}`,'apns-topic':e.APPLE_PASS_TYPE_ID,'apns-push-type':'background','apns-priority':'5'});
-      req.on('response',headers=>{const status=Number(headers[':status']);if(status===410) {this.s.run('DELETE FROM apple_registrations WHERE push_token=?',token);finish();}else if(status!==200)finish(new Problem(502,`Apple update failed (${status}).`));});
-      req.on('data',()=>{});req.on('end',()=>finish());req.on('error',finish);req.end('{}');
+      req.on('response',headers=>{const status=Number(headers[':status']);if(status===410) {removing=true;this.s.run('DELETE FROM apple_registrations WHERE push_token=?',token).then(()=>finish(),finish);}else if(status!==200)finish(new Problem(502,`Apple update failed (${status}).`));});
+      req.on('data',()=>{});req.on('end',()=>{if(!removing)finish();});req.on('error',finish);req.end('{}');
     });
   }
   async update(mid) {
     const ready=this.readiness();if(this.config.mode==='demo')return;
     requireThat(ready.apple&&ready.google,503,'Complete both Wallet configurations before syncing.');
-    const results=await Promise.allSettled([this.updateGoogle(mid),...this.s.all('SELECT DISTINCT push_token FROM apple_registrations WHERE membership_id=?',mid).map(r=>this.pushApple(r.push_token))]);
+    const registrations=await this.s.all('SELECT DISTINCT push_token FROM apple_registrations WHERE membership_id=?',mid);
+    const results=await Promise.allSettled([this.updateGoogle(mid),...registrations.map(r=>this.pushApple(r.push_token))]);
     const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;
   }
 }

@@ -26,39 +26,39 @@ export class Payments {
       success_url:`${this.config.origin}/account?order=${order.id}`,cancel_url:`${this.config.origin}/checkout/${order.id}?cancelled=1`,
       expires_at:String(Math.floor(order.expires_at/1000))
     },`checkout:${order.id}`);
-    this.s.run('UPDATE orders SET stripe_session=?,checkout_url=? WHERE id=?',session.id,session.url,order.id);
+    (await this.s.run('UPDATE orders SET stripe_session=?,checkout_url=? WHERE id=?',session.id,session.url,order.id));
     return {orderId:order.id,url:session.url};
   }
-  webhook(raw,signature) {
+  async webhook(raw,signature) {
     const event=verifyStripeSignature(raw,signature,this.config.env.STRIPE_WEBHOOK_SECRET,this.app.now());
     if(event.type==='checkout.session.completed'||event.type==='checkout.session.async_payment_succeeded') {
       const o=event.data.object;
-      if(o.payment_status==='paid') return this.app.settle({eventId:event.id,orderId:o.metadata.order_id,amount:o.amount_total,currency:o.currency,paymentIntent:o.payment_intent,sessionId:o.id});
+      if(o.payment_status==='paid') return (await this.app.settle({eventId:event.id,orderId:o.metadata.order_id,amount:o.amount_total,currency:o.currency,paymentIntent:o.payment_intent,sessionId:o.id}));
     }
     if(event.type==='charge.refunded') {
       const c=event.data.object;
       // Partial external refunds require manager reconciliation; never revoke all benefits silently.
       if(c.amount_refunded!==c.amount) return {reconcile:true};
-      const order=this.s.get('SELECT * FROM orders WHERE payment_intent=?',c.payment_intent);
-      if(order) this.s.transaction(()=>{
-        this.s.run("UPDATE orders SET state='refunded' WHERE id=?",order.id);
-        this.s.run("UPDATE reservations SET state='cancelled' WHERE order_id=? AND state!='attended'",order.id);
-        this.s.run("UPDATE queue_entries SET lane='standard',state='waiting',order_id=NULL WHERE order_id=? AND state IN('waiting','held')",order.id);
-        const m=this.s.get('SELECT id FROM memberships WHERE order_id=?',order.id);
-        if(m) {this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",m.id);this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",m.id);this.app.touch(m.id);}
-        this.app.audit(order.venue_id,null,'payment.refunded',order.id);
-      });
+      const order=(await this.s.get('SELECT * FROM orders WHERE payment_intent=?',c.payment_intent));
+      if(order) (await this.s.transaction(async ()=>{
+        (await this.s.run("UPDATE orders SET state='refunded' WHERE id=?",order.id));
+        (await this.s.run("UPDATE reservations SET state='cancelled' WHERE order_id=? AND state!='attended'",order.id));
+        (await this.s.run("UPDATE queue_entries SET lane='standard',state='waiting',order_id=NULL WHERE order_id=? AND state IN('waiting','held')",order.id));
+        const m=(await this.s.get('SELECT id FROM memberships WHERE order_id=?',order.id));
+        if(m) {(await this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",m.id));(await this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",m.id));(await this.app.touch(m.id));}
+        (await this.app.audit(order.venue_id,null,'payment.refunded',order.id));
+      }));
     }
     return {received:true};
   }
   async refund(orderId) {
-    const o=this.s.get('SELECT * FROM orders WHERE id=?',orderId);
+    const o=(await this.s.get('SELECT * FROM orders WHERE id=?',orderId));
     if(!o||o.state!=='refund_pending')return;
     if(this.config.mode!=='demo') {
       requireThat(o.payment_intent,409,'Missing payment reference. Manager reconciliation required.');
       const refund=await this.stripe('refunds',{payment_intent:o.payment_intent},`refund:${o.id}`);
       requireThat(refund.status==='succeeded',409,'Refund is not settled yet. Await the payment webhook or reconcile with the provider.');
     }
-    this.s.run("UPDATE orders SET state='refunded' WHERE id=? AND state='refund_pending'",orderId);
+    (await this.s.run("UPDATE orders SET state='refunded' WHERE id=? AND state='refund_pending'",orderId));
   }
 }

@@ -6,9 +6,10 @@ This is the **application codebase** at [SapceDandy/regulars_app](https://github
 
 ## Run the local demo
 
-Requires **Node.js 24.13+ within the 24.x line**. No third-party runtime packages, database server, build, or package installation are needed. OpenSSL is needed for live Apple pass signing and the signing test.
+Requires **Node.js 24.13+ within the 24.x line**. Run `npm ci` first. The local demo needs no database server or build step. OpenSSL is needed for live Apple pass signing and the signing test.
 
 ```sh
+npm ci
 cp .env.example .env
 npm start
 ```
@@ -38,7 +39,7 @@ npm test
 | At the door | Standard queue plus optional capped, escalating paid-priority lane |
 | Staff | Current member lookup, bottle receipt/service/corrections, check-in, queue actions |
 | Operator | Operating counts, campaign drafts/approval/copy links, sync/refund failures and retries |
-| Resilience | Persistent SQLite, transactions, checkout holds, signature checks, idempotency, job retries |
+| Resilience | Local SQLite or hosted PostgreSQL, transactions, checkout holds, signature checks, idempotency, job retries |
 
 See [implementation status](docs/IMPLEMENTATION_STATUS.md) for important limits. A generic iframe and staff API do **not** mean Square, Toast, OpenTable, Resy or another vendor is integrated.
 
@@ -79,3 +80,7 @@ For future updates from a clone, [publish-github.sh](scripts/publish-github.sh) 
 - [Implementation and verification status](docs/IMPLEMENTATION_STATUS.md)
 - [Next iterations](docs/ROADMAP.md)
 - [Official provider references](docs/REFERENCES.md)
+
+## Vercel pilot
+
+See [Vercel setup and pilot gates](docs/VERCEL.md). The hosted adapter uses Neon PostgreSQL, request-scoped connections and authenticated cron delivery. A protected preview is not a completed venue pilot. Run `npm run test:postgres` for the embedded PostgreSQL suite.

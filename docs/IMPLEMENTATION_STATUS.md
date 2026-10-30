@@ -2,6 +2,12 @@
 
 Prepared October 15, 2026; repository references updated October 16, 2026. The application destination is [SapceDandy/regulars_app](https://github.com/SapceDandy/regulars_app); the separate concept destination is [SapceDandy/regulars_brain](https://github.com/SapceDandy/regulars_brain). Both user-created repositories were discovered through the connected GitHub account. This application source is intended for regulars_app, with the existing public visibility preserved. Remote publication does not establish live deployment or provider readiness.
 
+## Vercel preparation — October 30, 2026
+
+Vercel project `regulars-app` and Neon database `regulars-pilot-db` are provisioned and linked for preview/production. The new adapter uses PostgreSQL and request-scoped pools, authenticated cron, and durable job leases. Local demo remains localhost-only. Preview requires Stripe test credentials; missing configuration returns 503 without enabling demo authentication.
+
+Local test evidence covers SQLite and embedded PostgreSQL. Real Neon concurrent workers, Vercel raw webhook forwarding, cron execution, SMS receipt, real Stripe sandbox delivery and native Wallet devices still require hosted verification. Stripe/Twilio credentials and operator-reviewed venue configuration are absent; full live deployment remains blocked. See [Vercel setup](VERCEL.md).
+
 ## Implemented and exercised locally
 
 | Area | Evidence |
