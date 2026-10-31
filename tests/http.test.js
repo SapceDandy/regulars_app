@@ -72,3 +72,16 @@ test('pilot personas and viewport tools are unavailable unless the runtime is ex
   const viewport=await f.call('/pilot?width=390&page=https://evil.example');
   assert.match(viewport.data,/src="\/" width="390"/);assert.doesNotMatch(viewport.data,/evil.example/);
 });
+
+test('profile edits persist only to the signed-in user and reject blank names',async t=>{
+  const f=await serverFixture(t);const first=await f.login('+12025550131'),second=await f.login('+12025550132');
+  const saved=await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'Pilot Updated',marketingOptIn:true}});
+  assert.equal(saved.status,200);
+  const account=(await f.call('/api/account',{cookie:first})).data;
+  assert.equal(account.user.name,'Pilot Updated');assert.equal(account.user.marketingOptIn,true);
+  assert.equal((await f.call('/api/account',{cookie:second})).data.user.name,'Test Patron');
+  assert.equal((await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'   ',marketingOptIn:false}})).status,400);
+  assert.equal((await f.call('/api/account',{cookie:first})).data.user.marketingOptIn,true);
+  assert.equal((await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'Pilot Updated',marketingOptIn:false}})).status,200);
+  assert.equal((await f.call('/api/account',{cookie:first})).data.user.marketingOptIn,false);
+});
