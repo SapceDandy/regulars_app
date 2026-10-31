@@ -82,7 +82,7 @@ Initial checks used the same protected `090ad9f` deployment above and synthetic 
 - Reproduced a UI defect: rejected membership attempts only displayed an external transient toast while a modal dialog was open; the dialog accessibility tree did not contain the error. Errors now render persistently inside the dialog with role=alert.
 - Corrected cancelled/expired checkout headings and one-guest wording. Wallet controls now explain that downloads are not enabled in the test, rather than implying a verified live Wallet service.
 
-Syntax/JSON validation passed (30 JavaScript files); SQLite and PGlite both passed 60/60 tests after the changes. Hosted verification of the fixes follows below. No real charges, texts or Wallet issuance occurred.
+Syntax/JSON validation passed (30 JavaScript files); SQLite and PGlite both passed 60/60 tests after the changes. Hosted verification of the fixes is recorded below. No real charges, texts or Wallet issuance occurred.
 
 ### Provider setup checkpoint
 
@@ -91,3 +91,15 @@ Syntax/JSON validation passed (30 JavaScript files); SQLite and PGlite both pass
 - Kudjo Vercel metadata identified Square sandbox configuration, but sensitive application credentials could not be read back, and no standalone access token was present. No Kudjo credentials were copied. A separate Regulars Square application and adapter implementation are still needed.
 - A Google Wallet business profile form was prepared as Regulars; enrollment has not been submitted because accepting the Console terms requires account-owner approval.
 - Apple Developer is at sign-in. Membership/enrollment, Pass Type ID, signing certificate and device installation remain open.
+
+### Hosted recheck of the UI fixes
+
+Code `ee24876075b225d7efad356b84318db8b7ea3eca`; Vercel preview `dpl_CJWsWatRBzLarpyAx67Gg7zhcvau`, https://regulars-1zhao64e1-sapcedandy-s-team.vercel.app. READY; Node.js/static client, no framework; build stage approximately 8 seconds.
+
+- Existing Second Pilot Guest and private locker L09 persisted across deployment.
+- Repeated private membership submission showed the renewal-window error inside the modal, visible in the accessibility tree with an alert role; screenshot confirms it remains visible. Actual screen-reader speech is not verified.
+- The cancelled Bar seat 2 order rendered the heading “Checkout cancelled.” and “1 guest · cancelled,” with no payment action.
+- Account displayed the updated Wallet test limitation beside disabled Apple/Google controls.
+- Evidence: [visible membership dialog error](qa/pilot-dialog-round3.jpg).
+
+Expired-checkout copy and singular queue/staff wording passed syntax validation but were not each independently exercised in this hosted recheck. Core provider, device, concurrency and operational launch gates remain open.
