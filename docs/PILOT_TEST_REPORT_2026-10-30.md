@@ -70,3 +70,24 @@ Tested code: `090ad9fac5cde9511999e294e7000b4e80cba0a0`; protected deployment: h
 Syntax/JSON validation passed (30 JavaScript files). SQLite: 60/60; PGlite: 60/60. New tests cover profile persistence, user isolation, blank-name rejection, opt-in removal, dirty drafts during in-flight refreshes and normal background rendering. Client refresh tests execute the real browser script in a minimal mocked DOM; hosted browser evidence above complements them.
 
 Profile, FAQ and calendar-download browser checks are now complete for the paths described above. Other first-round limitations remain: real providers/devices, active-day staff rehearsal, all membership variants, hosted contention, recovery/operations and accessibility audit. Apple signing/device verification and Square integration are not completed by this change. No real messages or payments occurred. Minor copy follow-up: single-person checkout currently says “1 guests.”
+
+## Additional pilot checks — October 31, 2026
+
+Initial checks used the same protected `090ad9f` deployment above and synthetic Second Pilot Guest.
+
+- Private locker checkout was reloaded before completing the simulated purchase. One $99 paid order produced locker L09, with an expiration of November 30, 2026; membership persisted after account reload.
+- An immediate repeat private membership attempt was rejected with the seven-day renewal-window message. Account still had one paid membership.
+- Bar seat 2 was held for $56.25 and cancelled before simulated payment. Checkout and account showed cancelled; no reservation appeared. Bar seat 2 was selectable again, and the private membership stayed active.
+- Switching a four-person table selection to a one-person bar seat reset both the allowed maximum and entered party size to one.
+- Reproduced a UI defect: rejected membership attempts only displayed an external transient toast while a modal dialog was open; the dialog accessibility tree did not contain the error. Errors now render persistently inside the dialog with role=alert.
+- Corrected cancelled/expired checkout headings and one-guest wording. Wallet controls now explain that downloads are not enabled in the test, rather than implying a verified live Wallet service.
+
+Syntax/JSON validation passed (30 JavaScript files); SQLite and PGlite both passed 60/60 tests after the changes. Hosted verification of the fixes follows below. No real charges, texts or Wallet issuance occurred.
+
+### Provider setup checkpoint
+
+- The existing separate Regulars Vercel project remains the pilot destination.
+- A separate Regulars Stripe sandbox has been created; connector authorization and test keys/webhook configuration remain open.
+- Kudjo Vercel metadata identified Square sandbox configuration, but sensitive application credentials could not be read back, and no standalone access token was present. No Kudjo credentials were copied. A separate Regulars Square application and adapter implementation are still needed.
+- A Google Wallet business profile form was prepared as Regulars; enrollment has not been submitted because accepting the Console terms requires account-owner approval.
+- Apple Developer is at sign-in. Membership/enrollment, Pass Type ID, signing certificate and device installation remain open.

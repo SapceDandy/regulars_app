@@ -1,5 +1,12 @@
 # Validation — October 30, 2026
 
+## October 31 additional checks
+
+- Syntax/JSON validation: passed, 30 JavaScript files.
+- SQLite and PGlite: **60 passed each, 0 failed** after dialog error and checkout copy changes.
+- Private locker, duplicate/early renewal, unpaid-hold release and party-size switching exercised in the hosted synthetic pilot.
+- Provider account setup remains partial; no native pass or real provider transaction is claimed.
+
 ## October 31 follow-up
 
 - `npm run check`: passed, 30 JavaScript files plus JSON.
