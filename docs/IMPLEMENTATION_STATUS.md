@@ -10,7 +10,7 @@ Local test evidence covers SQLite and embedded PostgreSQL. Real Neon concurrent 
 
 ## Synthetic hosted pilot — October 30, 2026
 
-The protected preview now runs guest/manager fixtures, simulated checkout and refunds, and persistent Neon transactions. Hosted browser testing covered discovery, memberships, season reservations, resource exclusion, queues, bottle service, role denial, inquiry and promotion approval. Narrow-phone navigation, search counts and pass dates were corrected. Both database test suites pass 57 tests. This does not verify real payments, SMS or native Wallet delivery. Square is not implemented; the existing payment adapter is Stripe. See [pilot test report](PILOT_TEST_REPORT_2026-10-30.md).
+The protected preview now runs guest/manager fixtures, simulated checkout and refunds, and persistent Neon transactions. Hosted browser testing covered discovery, memberships, season reservations, resource exclusion, queues, bottle service, role denial, inquiry and promotion approval. Narrow-phone navigation, search counts and pass dates were corrected. The October 31 follow-up brings both database test suites to 60 passing tests, adds profile/FAQ/calendar browser evidence, protects unsaved edits from background refresh, and improves mobile staff navigation. This does not verify real payments, SMS or native Wallet delivery. Square is not implemented; the existing payment adapter is Stripe. See [pilot test report](PILOT_TEST_REPORT_2026-10-30.md).
 
 ## Implemented and exercised locally
 

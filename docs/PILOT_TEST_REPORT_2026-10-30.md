@@ -44,3 +44,29 @@ Code: `da80f030c42482aed999049bb635b3a3b87f901e`. Vercel deployment `dpl_7DyMdDi
 - Fictional venues, illustrative prices, schedules and terms need operator review before real customers. No production readiness or real partner approval is claimed.
 
 To rehearse: open the protected preview, use My Regulars and the Test guest / Second guest / Test manager buttons. Sign out to switch persona. `/pilot` provides page and viewport selectors. Fixture state persists between sessions and deployments on the pilot branch.
+
+## Follow-up verification — October 31, 2026
+
+Tested code: `090ad9fac5cde9511999e294e7000b4e80cba0a0`; protected deployment: https://regulars-hpgmbt845-sapcedandy-s-team.vercel.app (dpl_J7VHeoctW3bp4WgwzFRmyyrpn2Ms).
+
+### Fixed and verified
+
+- Reproduced an unsaved profile name reverting after the 30-second background refresh once focus left the input. Dirty forms now block background rendering, including when an edit begins during an in-flight refresh. Active writes, dialogs and focused controls also prevent disruptive refreshes. Refresh requests cannot overlap.
+- Added persistent, announced unsaved/saved profile status. Successful saves only clear dirty state if no newer edits occurred during the request.
+- Phone staff navigation now uses visible 48px buttons in two columns instead of a horizontally scrolling row. At a 320px frame, page width/scroll width both measured 303px and navigation width/scroll width both measured 261px. Selected task state is exposed with aria-pressed.
+- Corrected “1 bottles” to “1 bottle” on the membership card; purchase rows can wrap at phone widths.
+
+### Browser evidence
+
+- Unsaved profile draft survived beyond the refresh interval; saving and reloading retained the new name. Blank-space name returned a validation error and retained the draft. Restored fixture name to Pilot Guest.
+- Venue FAQ answered that locker membership does not include seating.
+- Single-game Bar seat 1 booking for one person completed simulated $56.25 checkout and appeared confirmed in account and staff views.
+- Add to calendar downloaded an ICS file. Inspected UTC start/end (November 2 22:46:32Z to November 3 02:46:32Z), venue, title and arrival deadline; these matched the displayed November 2 CST window. Import into a physical-device calendar remains untested.
+- Mobile manager navigated to Lockers & bottles and saw the existing 750mL bottle; dashboard showed $150.25 collected orders, one membership, one upcoming confirmation and no unfinished jobs.
+- Screenshot: [320px staff navigation](qa/pilot-staff-round2.jpg).
+
+### Automated evidence and remaining limits
+
+Syntax/JSON validation passed (30 JavaScript files). SQLite: 60/60; PGlite: 60/60. New tests cover profile persistence, user isolation, blank-name rejection, opt-in removal, dirty drafts during in-flight refreshes and normal background rendering. Client refresh tests execute the real browser script in a minimal mocked DOM; hosted browser evidence above complements them.
+
+Profile, FAQ and calendar-download browser checks are now complete for the paths described above. Other first-round limitations remain: real providers/devices, active-day staff rehearsal, all membership variants, hosted contention, recovery/operations and accessibility audit. Apple signing/device verification and Square integration are not completed by this change. No real messages or payments occurred. Minor copy follow-up: single-person checkout currently says “1 guests.”

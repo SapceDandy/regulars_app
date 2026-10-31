@@ -1,6 +1,14 @@
 # Validation — October 30, 2026
 
-## Current synthetic preview verification
+## October 31 follow-up
+
+- `npm run check`: passed, 30 JavaScript files plus JSON.
+- SQLite and PGlite suites: **60 passed each, 0 failed**.
+- Hosted profile draft/save/reload/validation, FAQ, single-game booking and calendar download verified.
+- 320px staff navigation verified without horizontal overflow; all task controls 48px high.
+- Evidence and remaining gates are in the [pilot report](docs/PILOT_TEST_REPORT_2026-10-30.md).
+
+## October 30 synthetic preview verification
 
 - `npm run check`: passed.
 - `npm test`: **57 passed, 0 failed**, SQLite.
