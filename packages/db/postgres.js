@@ -36,8 +36,7 @@ export function createPostgresStore(pool, {schema='public'}={}) {
       await client.query('SET LOCAL search_path TO regulars_pilot');
       const result=await client.query(postgresSql(sql),values);
       await client.query('COMMIT');return result;
-    } catch(error) {await client.query('ROLLBACK').catch(()=>{});throw error;}
-    finally {client.release();}
+    } catch(error) {await client.query('ROLLBACK').catch(()=>{});throw error;}finally {client.release();}
   };
   const store = {
     dialect: 'postgres',
@@ -61,7 +60,7 @@ export function createPostgresStore(pool, {schema='public'}={}) {
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
         throw error;
-      } finally {client.release();}
+      }finally {client.release();}
     },
     async migrate() {
       await store.transaction(async () => {

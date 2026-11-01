@@ -30,7 +30,7 @@ export function googleDocument(member,config,next) {
     linksModuleData:{uris:[{id:'account',uri:`${config.origin}/account`,description:'View your account'}]},validTimeInterval:{start:{date:new Date(member.starts_at).toISOString()},end:{date:new Date(member.ends_at).toISOString()}}};
 }
 export class Wallets {
-  constructor(store,regulars,config,{request=providerFetch}={}) {this.s=store;this.app=regulars;this.config=config;this.request=request;this.access=null;}
+  constructor(store,regulars,config,{request=providerFetch,connect:connectPush=connect}={}) {this.s=store;this.app=regulars;this.config=config;this.request=request;this.connectPush=connectPush;this.access=null;}
   readiness() {
     const e=this.config.env;return {apple:this.config.mode==='live'&&['APPLE_PASS_TYPE_ID','APPLE_TEAM_ID','APPLE_CERT_PATH','APPLE_KEY_PATH','APPLE_WWDR_PATH'].every(k=>!!e[k]),google:this.config.mode==='live'&&['GOOGLE_ISSUER_ID','GOOGLE_CLASS_ID','GOOGLE_SERVICE_ACCOUNT_EMAIL','GOOGLE_PRIVATE_KEY_PATH'].every(k=>!!e[k])};
   }
@@ -63,7 +63,9 @@ export class Wallets {
     if(this.access&&this.access.expires>Date.now())return this.access.token;
     const e=this.config.env;const now=Math.floor(Date.now()/1000);
     const assertion=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,scope:'https://www.googleapis.com/auth/wallet_object.issuer',aud:'https://oauth2.googleapis.com/token',iat:now,exp:now+3600},readFileSync(e.GOOGLE_PRIVATE_KEY_PATH));
-    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});const data=await response.json();this.access={token:data.access_token,expires:Date.now()+Math.max(0,data.expires_in-60)*1000};return this.access.token;
+    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});const data=await response.json();
+    requireThat(typeof data?.access_token==='string'&&data.access_token.length>0&&Number.isFinite(data.expires_in)&&data.expires_in>0,502,'Google Wallet authorization returned an invalid token.');
+    this.access={token:data.access_token,expires:Date.now()+Math.max(0,data.expires_in-60)*1000};return this.access.token;
   }
   async updateGoogle(mid) {
     const m=(await this.app.membershipSnapshot(mid));const body=googleDocument(m,this.config,(await this.next(m)));const access=await this.googleAccess();
@@ -75,7 +77,7 @@ export class Wallets {
   pushApple(token) {
     const e=this.config.env;
     return new Promise((resolve,reject)=>{
-      const session=connect('https://api.push.apple.com',{cert:readFileSync(e.APPLE_CERT_PATH),key:readFileSync(e.APPLE_KEY_PATH)});
+      const session=this.connectPush('https://api.push.apple.com',{cert:readFileSync(e.APPLE_CERT_PATH),key:readFileSync(e.APPLE_KEY_PATH)});
       let done=false,removing=false;const finish=(error)=>{if(done)return;done=true;session.close();error?reject(error):resolve();};
       session.setTimeout(12_000,()=>finish(new Problem(502,'Apple update timed out.')));session.on('error',finish);
       const req=session.request({':method':'POST',':path':`/3/device/${token}`,'apns-topic':e.APPLE_PASS_TYPE_ID,'apns-push-type':'background','apns-priority':'5'});

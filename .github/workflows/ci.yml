@@ -12,7 +12,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Install locked dependencies
+        run: npm ci
       - name: Validate source
         run: npm run check
-      - name: Exercise domain and HTTP flows
-        run: npm test
+      - name: Require complete runtime coverage
+        run: npm run test:coverage
+      - name: Exercise PostgreSQL adapter and application flows
+        run: npm run test:postgres

@@ -24,7 +24,13 @@ Open `http://localhost:3000`. Demo mode binds only to localhost. Sample venues, 
 ```sh
 npm run check
 npm test
+npm run test:coverage
+npm run test:postgres
 ```
+
+`test:coverage` requires 100% native V8 line, branch and function coverage for every application JavaScript file under `api/`, `apps/` and `packages/`, plus the seed and backup commands. It also fails if a runtime file is absent from the report. The generated `coverage-summary.json` is local and ignored by Git. Tests, dependencies and developer validation tools are outside this runtime scope. CI installs locked dependencies, enforces coverage and runs the PostgreSQL suite.
+
+Browser event tests execute the exact shipped ES module with small DOM doubles; they do not replace visual, accessibility or real-device testing. The suite uses Node 24 experimental VM-module and module-mocking flags only during tests. The PostgreSQL suite uses PGlite with two test workers to bound memory; disk backup and local-server process tests still use SQLite. Provider transports are mocked, and signing keys are temporary test fixtures. Real SMS, payment and Wallet delivery remain separate pilot gates.
 
 ## What is implemented
 

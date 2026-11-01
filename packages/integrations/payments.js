@@ -39,15 +39,22 @@ export class Payments {
       const c=event.data.object;
       // Partial external refunds require manager reconciliation; never revoke all benefits silently.
       if(c.amount_refunded!==c.amount) return {reconcile:true};
-      const order=(await this.s.get('SELECT * FROM orders WHERE payment_intent=?',c.payment_intent));
-      if(order) (await this.s.transaction(async ()=>{
+      return this.s.transaction(async ()=>{
+        if(await this.s.get('SELECT id FROM payment_events WHERE id=?',event.id))return {duplicate:true};
+        const order=await this.s.get('SELECT * FROM orders WHERE payment_intent=?',c.payment_intent);
+        if(!order)return {received:true};
+        await this.s.run('INSERT INTO payment_events VALUES(?,?)',event.id,this.app.now());
+        if(order.state==='refunded')return {duplicate:true};
         (await this.s.run("UPDATE orders SET state='refunded' WHERE id=?",order.id));
         (await this.s.run("UPDATE reservations SET state='cancelled' WHERE order_id=? AND state!='attended'",order.id));
         (await this.s.run("UPDATE queue_entries SET lane='standard',state='waiting',order_id=NULL WHERE order_id=? AND state IN('waiting','held')",order.id));
         const m=(await this.s.get('SELECT id FROM memberships WHERE order_id=?',order.id));
-        if(m) {(await this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",m.id));(await this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",m.id));(await this.app.touch(m.id));}
+        if(m) {(await this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",m.id));(await this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",m.id));}
+        // Ticket refunds also change the next reservation displayed on a pass.
+        for(const member of await this.s.all('SELECT id FROM memberships WHERE user_id=? AND venue_id=?',order.user_id,order.venue_id))await this.app.touch(member.id);
         (await this.app.audit(order.venue_id,null,'payment.refunded',order.id));
-      }));
+        return {received:true};
+      });
     }
     return {received:true};
   }

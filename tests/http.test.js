@@ -1,18 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApplication } from '../apps/web/server.js';
 import { configuration } from '../apps/web/config.js';
-import { testStore } from './helpers/store.js';
+import {serverFixture} from './helpers/http.js';
 
-async function serverFixture(t,{now}={}) {
-  const config=configuration({APP_MODE:'demo',PUBLIC_ORIGIN:'http://127.0.0.1:3000'});const store=await testStore();const r=(await createApplication({config,store,now}));await new Promise(resolve=>r.server.listen(0,'127.0.0.1',resolve));config.origin=`http://127.0.0.1:${r.server.address().port}`;
-  t.after(async()=>{r.server.closeAllConnections();await new Promise(resolve=>r.server.close(resolve));(await store.close());});
-  const call=async(path,{method='GET',body,cookie,origin=true,key}={})=>{
-    const response=await fetch(config.origin+path,{method,headers:{...(origin?{origin:config.origin}:{}),...(method!=='GET'?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{}),...(key?{'idempotency-key':key}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});const content=response.headers.get('content-type')??'';return {status:response.status,headers:response.headers,data:content.includes('json')?await response.json():await response.text()};
-  };
-  const login=async(phone='+12025550101')=>{const start=await call('/api/auth/start',{method:'POST',body:{phone,smsConsent:true}});assert.equal(start.status,200);const verify=await call('/api/auth/verify',{method:'POST',body:{phone,code:start.data.demoCode,name:'Test Patron'}});assert.equal(verify.status,200);return verify.headers.get('set-cookie').split(';')[0];};
-  return {...r,call,login};
-}
 
 test('discovery pages expose metadata but private APIs require phone sign-in',async t=>{
   const f=await serverFixture(t);const page=await f.call('/v/copper-room');assert.equal(page.status,200);assert.match(page.data,/<title>The Copper Room/);assert.match(page.data,/noindex,nofollow/);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'self'/);assert.equal((await f.call('/api/account')).status,401);assert.equal((await f.call('/api/staff/copper-room')).status,401);

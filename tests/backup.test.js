@@ -11,7 +11,7 @@ import {Regulars} from '../packages/core/regulars.js';
 
 const script=fileURLToPath(new URL('../scripts/backup.js',import.meta.url));
 function workspace(t){const dir=mkdtempSync(join(tmpdir(),'regulars-backup-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir;}
-function run(dir,path,extra={}){return spawnSync(process.execPath,[script],{cwd:dir,env:{PATH:process.env.PATH,APP_MODE:'demo',DATABASE_PATH:path,...extra},encoding:'utf8',timeout:15000});}
+function run(dir,path,extra={}){return spawnSync(process.execPath,[script],{cwd:dir,env:{PATH:process.env.PATH,APP_MODE:'demo',DATABASE_PATH:path,...(process.env.NODE_V8_COVERAGE?{NODE_V8_COVERAGE:process.env.NODE_V8_COVERAGE}:{}),...extra},encoding:'utf8',timeout:15000});}
 
 test('backup refuses a missing source instead of creating an empty successful backup',t=>{
   const dir=workspace(t),source=join(dir,'missing.sqlite');const result=run(dir,source);
