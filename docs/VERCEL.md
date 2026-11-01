@@ -28,10 +28,30 @@ The Neon integration secrets are sensitive and need not be exported. PostgreSQL 
 3. Configure the sandbox Stripe webhook. Vercel Authentication blocks third-party webhooks unless explicitly allowed through a protected webhook access mechanism; configure that deliberately before testing. Keep any bypass token secret. Verify raw-byte signature validation, duplicate delivery and mismatched amount rejection on the hosted function.
 4. Use controlled pilot phone numbers to verify sign-in, expiry, sign-out and rate limits. Test guest enrollment, sandbox checkout, account activation, cancellation and refund. Verify two separate hosted clients competing for the last seat have exactly one winner.
 5. Rehearse staff role isolation, check-in, bottle receipt/service/correction, priority capacity and order retries. Invoke preview cron manually with the secret; verify leases and recovery after a killed worker. The production cron runs every minute; allow the extra scheduling delay when checking expiry.
-6. Configure Wallet issuer credentials separately and test actual iOS/Android installation and refresh. Apple signing requires OpenSSL and mounted credentials; compatibility and delivery on Vercel remain unverified. Do not advertise native Wallet readiness until tested.
+6. Configure Wallet issuer credentials separately and test actual iOS/Android installation and refresh. Apple signing requires OpenSSL and server-only PEM secrets or mounted credentials; runtime compatibility and delivery on Vercel remain unverified. Do not advertise native Wallet readiness until tested.
 7. Verify Neon restore/recovery, monitoring, provider reconciliation and venue staff acceptance before promoting. Deployment success alone is not pilot completion.
 
 ## Operational limits
+
+### Wallet signing secrets on Vercel
+
+Use environment Secrets `APPLE_CERT_PEM`, `APPLE_KEY_PEM`, `APPLE_WWDR_PEM`
+and `GOOGLE_PRIVATE_KEY_PEM` with the original multiline PEM contents. Keep
+`APPLE_PASS_TYPE_ID`, `APPLE_TEAM_ID`, `GOOGLE_ISSUER_ID`, `GOOGLE_CLASS_ID`
+and `GOOGLE_SERVICE_ACCOUNT_EMAIL` configured as well. Scope credentials to the
+isolated provider-testing branch/project first; never use a public variable
+prefix or commit PEM files. A PEM value takes precedence over its corresponding
+`*_PATH`; clear stale sources when rotating credentials.
+
+Google signing and APNs TLS read the secrets in memory. Apple package signing
+writes owner-readable files in a private temporary directory, invokes OpenSSL
+with fixed arguments, then removes that directory on success or failure. No
+private key is added to the pass ZIP or returned by `/api/config`. Mounted
+`*_PATH` settings remain supported for dedicated servers. These paths have local
+cryptographic tests; trusted Apple certificates, actual Google authorization,
+OpenSSL availability in the deployed function and real-device delivery remain
+separate acceptance checks. Synthetic previews continue to discard provider
+configuration and block provider calls.
 
 Transactions use one PostgreSQL advisory lock to preserve the original inventory allocation guarantees. This bounds throughput and requires hosted load testing before broader rollout. Providers are called outside database transactions. Jobs use five-minute leases and token-fenced completion with at-least-once delivery; Stripe idempotency prevents duplicate refund effects.
 

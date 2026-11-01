@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,createHmac,verify} from 'node:crypto';
-import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync,readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -62,4 +62,20 @@ test('customer cancellation survives refund outage and only the correct venue ma
   for(const cookie of [f.customer,f.staff,f.outsider])assert.equal((await f.call(`/api/staff/jobs/${job.id}/retry`,{method:'POST',cookie,body:{}})).status,403);
   available=true;assert.equal((await f.call(`/api/staff/jobs/${job.id}/retry`,{method:'POST',cookie:f.manager,body:{}})).status,200);await f.jobs.tick();assert.equal((await f.call(`/api/orders/${oid}`,{cookie:f.customer})).data.state,'refunded');assert.equal((await f.call('/api/staff/copper-room/jobs',{cookie:f.manager})).data.length,0);assert.deepEqual(keys,[`refund:${oid}`,`refund:${oid}`]);
   assert.equal((await f.store.get('SELECT state FROM reservations WHERE order_id=?',oid)).state,'cancelled');
+});
+
+test('server-only PEM secrets issue verifiable passes without a private-key mount and clean signing failures',async t=>{
+  const f=await actors(t),k=signingFixture(t,f),e=f.config.env;
+  for(const name of ['APPLE_CERT','APPLE_KEY','APPLE_WWDR','GOOGLE_PRIVATE_KEY']){e[`${name}_PEM`]=readFileSync(e[`${name}_PATH`],'utf8');delete e[`${name}_PATH`];}
+  rmSync(join(k.dir,'key.pem'));
+  const previousTmp=process.env.TMPDIR;process.env.TMPDIR=k.dir;
+  t.after(()=>{if(previousTmp===undefined)delete process.env.TMPDIR;else process.env.TMPDIR=previousTmp;});
+  const purchase=await f.call('/api/orders',{method:'POST',cookie:f.customer,key:'pem-member',body:{kind:'membership',venueId:'v_copper',planId:'v_copper_shared'}});assert.equal(purchase.status,201);await pay(f,purchase.data.orderId);
+  const m=(await f.call('/api/account',{cookie:f.customer})).data.memberships[0];
+  const pair=await passes(f,k,m.id);assert.equal(pair.apple.serialNumber,m.id);assert.equal(pair.google.id,`test-issuer.${m.id}`);
+  const visible=await f.call('/api/config');assert.deepEqual(visible.data.wallets,{apple:true,google:true});assert.doesNotMatch(JSON.stringify(visible.data),/BEGIN|PRIVATE|PEM/);
+  assert.deepEqual(readdirSync(k.dir).filter(name=>name.startsWith('regulars-pass-')),[]);
+  e.APPLE_KEY_PEM='invalid-test-key';await assert.rejects(f.wallets.apple(m.id));
+  assert.deepEqual(readdirSync(k.dir).filter(name=>name.startsWith('regulars-pass-')),[],'failed signing must remove temporary credentials');
+  delete e.APPLE_KEY_PEM;assert.equal(f.wallets.readiness().apple,false);delete e.GOOGLE_PRIVATE_KEY_PEM;assert.equal(f.wallets.readiness().google,false);
 });

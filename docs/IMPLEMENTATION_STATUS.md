@@ -1,5 +1,9 @@
 # Implementation and verification status
 
+## November 1 — Wallet secrets for serverless deployment
+
+Wallet signing now accepts server-only Apple certificate/key/WWDR PEM secrets and a Google private-key PEM secret, with mounted-file compatibility retained. Apple signing uses owner-readable temporary files and removes them after success or failure; Google signing and APNs TLS can read secrets directly in memory. Two new regressions verify actual self-signed Apple packages, Google signatures, secret-free configuration responses, missing-key readiness, cleanup on signing failure and mocked OAuth/APNs transports. Syntax checks and 157 tests pass, with 100% measured runtime coverage. Provider account approval, trusted certificates, actual Vercel signing and physical-device acceptance remain open; no native Wallet readiness is claimed.
+
 ## November 1 — payment rehearsal and accessibility audit
 
 Actual Regulars Stripe sandbox checkout and CLI-forwarded signed webhooks passed against an isolated local test fixture: activation, decline, 3D Secure retry, duplicate/tampered events, partial/full refunds, manager review, cancellation and hold release. All sandbox payments were refunded and unused sessions expired. A reusable opt-in procedure is in [tests/manual/README.md](../tests/manual/README.md). Hosted return URLs and Vercel webhook delivery remain separate gates.

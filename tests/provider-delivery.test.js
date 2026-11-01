@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {createHmac,generateKeyPairSync,verify} from 'node:crypto';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fixture} from './helpers/fixture.js';
@@ -91,6 +91,15 @@ function transport(run){
   session.setTimeout=(ms,fn)=>{assert.equal(ms,12000);timeout=fn;};session.close=()=>{session.closed=(session.closed??0)+1;};session.request=headers=>{session.headers=headers;return req;};req.end=body=>{assert.equal(body,'{}');queueMicrotask(()=>run({session,req,timeout:()=>timeout()}));};
   return{session,connect:()=>session};
 }
+test('PEM secrets sign Google OAuth and supply Apple push TLS without reading stale mount paths',async t=>{
+  const f=await fxt(t),k=keys(t),e=k.config.env;
+  for(const name of ['GOOGLE_PRIVATE_KEY','APPLE_CERT','APPLE_KEY']){e[`${name}_PEM`]=readFileSync(e[`${name}_PATH`],'utf8');e[`${name}_PATH`]='/missing/stale-mount';}
+  let assertion,tls;
+  const tr=transport(({req})=>{req.emit('response',{':status':200});req.emit('end');});
+  const w=new Wallets(f.s,f.app,k.config,{request:async(url,options)=>{assert.equal(url,'https://oauth2.googleapis.com/token');assertion=options.body.get('assertion');return{json:async()=>({access_token:'fixture-access',expires_in:60})};},connect:(url,options)=>{assert.equal(url,'https://api.push.apple.com');tls=options;return tr.connect();}});
+  assert.equal(await w.googleAccess(),'fixture-access');const [head,body,sig]=assertion.split('.');assert.equal(verify('RSA-SHA256',Buffer.from(`${head}.${body}`),k.publicKey,Buffer.from(sig,'base64url')),true);
+  await w.pushApple('d'.repeat(64));assert.equal(tls.cert.toString(),e.APPLE_CERT_PEM);assert.equal(tls.key.toString(),e.APPLE_KEY_PEM);assert.equal(tr.session.closed,1);
+});
 test('Apple push handles success, invalid tokens, transport failures and duplicate terminal events',async t=>{
   const f=await fxt(t),m=await f.member(),k=keys(t),token='a'.repeat(64);
   for(const scenario of ['success','gone','status','session','request','timeout']){
