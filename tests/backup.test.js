@@ -30,6 +30,10 @@ test('online SQLite backup restores memberships, stock, bookings, audit and pend
     const order=await f.ticket();await f.paid(order);
     await f.app.recordRefund({eventId:'restore-partial',paymentIntent:`pi_${order.id}`,orderId:order.id,amount:order.amount_cents,currency:'usd',refundedAmount:500});
     await f.app.reviewRefund(f.manager,order.id,{refundedCents:500,note:'Synthetic reconciliation before backup.'});
+    await f.app.recordPaymentCase({eventId:'restore-dispute',kind:'dispute',reference:'du_restore',paymentIntent:`pi_${order.id}`});
+    await f.app.reviewPaymentCase(f.manager,'restore-dispute',{note:'Synthetic dispute review.'});
+    await f.app.recordSquarePayment({id:'restore-square',venueId:'v_copper',amount:500,currency:'USD',createdAt:f.now()});
+    await f.app.resolveSquarePayment(f.manager,'restore-square',{action:'dismiss',note:'Synthetic food sale.'});
     const expected=await f.app.account(f.uid);
     const result=run(dir,source);assert.equal(result.status,0,result.stderr);
     const backup=join(dir,'backups',readdirSync(join(dir,'backups'))[0]);
@@ -39,7 +43,7 @@ test('online SQLite backup restores memberships, stock, bookings, audit and pend
     assert.equal((await restored.all('PRAGMA foreign_key_check')).length,0);
     assert.deepEqual(await app.account(f.uid),expected);
     assert.equal((await app.membershipSnapshot(m.id)).bottles[0].remaining_ml,705);
-    for(const table of ['audit','bottle_log','outbox','payment_events'])assert.deepEqual(await restored.all(`SELECT * FROM ${table} ORDER BY id`),await f.s.all(`SELECT * FROM ${table} ORDER BY id`));
+    for(const table of ['audit','bottle_log','outbox','payment_events','payment_cases','pos_payments'])assert.deepEqual(await restored.all(`SELECT * FROM ${table} ORDER BY id`),await f.s.all(`SELECT * FROM ${table} ORDER BY id`));
     assert.deepEqual(await restored.all('SELECT * FROM refund_reviews ORDER BY order_id'),await f.s.all('SELECT * FROM refund_reviews ORDER BY order_id'));
     await assert.rejects(app.createOrder(f.other,{kind:'ticket',venueId:'v_copper',eventId:f.games[0].id,resourceId:f.resource.id,partySize:2},'after-restore'),error=>error.status===409);
   }finally{if(restored)await restored.close();await f.s.close();}

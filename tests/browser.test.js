@@ -188,7 +188,7 @@ test('payment reviews show exact refund balances, escape notes and keep failed r
   const review={order_id:'review-order',customer_name:'Test <guest>',kind:'ticket',order_state:'paid',amount_cents:4500,refunded_cents:500,status:'open',note:''};let reject=true;
   const staff={...data.staff,refundReviews:[review,{...review,order_id:'reviewed',status:'reviewed',customer_name:'',note:'Checked <script>fixture</script>'},{...review,order_id:'full',status:'closed',refunded_cents:4500}]};
   const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:staff}),'POST /api/staff/refund-reviews/review-order':()=>reject?{status:409,data:{error:'The refunded amount changed.'}}:{data:{reviewed:true}}})});
-  assert.match(html(b),/A partial refund needs manager review/);await b.click('staff-tab','refunds');let panel=b.elements['#staff-panel'].innerHTML;
+  assert.match(html(b),/A payment report needs manager review/);await b.click('staff-tab','refunds');let panel=b.elements['#staff-panel'].innerHTML;
   assert.match(panel,/\$5 refunded of \$45 · \$40 after refund/);assert.match(panel,/Fully refunded/);assert.match(panel,/Reviewed/);assert.match(panel,/&lt;script&gt;/);assert.doesNotMatch(panel,/<script>|Test <guest>/);
   await b.click('review-refund','review-order');assert.match(b.elements['#modal-content'].innerHTML,/Saving this note does not send a refund/);
   const form=b.form('refund-review-form',{note:'Guest confirmed the adjustment.'},{order:'review-order',refunded:'500'});await b.submit(form);assert.equal(b.elements['#modal'].open,true);assert.match(b.elements['#dialog-error'].textContent,/amount changed/);assert.equal(last(b).body.refundedCents,500);
@@ -210,4 +210,29 @@ test('slow sync responses cannot replace a newer staff tab or refreshed staff da
   const detached=b.click('staff-tab','sync');await Promise.resolve();b.elements['#staff-panel'].isConnected=false;resolve({data:[]});await detached;
   b.elements['#staff-panel'].isConnected=true;const failure=b.click('staff-tab','sync');await Promise.resolve();await b.click('staff-tab','refunds');resolve({status:503,data:{error:'Obsolete sync failure'}});await failure;assert.doesNotMatch(b.elements['#toast'].textContent,/Obsolete/);
   const current=b.click('staff-tab','sync');await Promise.resolve();resolve({status:503,data:{error:'Current sync failure'}});await current;assert.equal(b.elements['#toast'].textContent,'Current sync failure');
+});
+
+test('dispute review cards escape provider text, retain failed notes and distinguish reports from current status',async()=>{
+  const c={id:'case-1',kind:'dispute',reference:'du_<fixture>',amount_cents:500,currency:'usd',provider_status:'needs_response',created_at:Date.now(),due_at:Date.now()+86400000,reviewed_at:null,customer_name:'<Guest>',note:''};
+  const staff={...data.staff,paymentCases:[c,{...c,id:'reviewed',reviewed_at:Date.now(),amount_cents:null,due_at:null,customer_name:'',note:'Private <note>'}]};let fail=true;
+  const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:staff}),'POST /api/staff/payment-cases/case-1':()=>fail?{status:503,data:{error:'Retry later'}}:{data:{reviewed:true}}})});
+  assert.match(html(b),/A payment report needs manager review/);await b.click('staff-tab','refunds');const panel=b.elements['#staff-panel'].innerHTML;
+  assert.match(panel,/du_&lt;fixture&gt;/);assert.match(panel,/Reported response deadline/);assert.match(panel,/Amount unavailable/);assert.match(panel,/Private &lt;note&gt;/);assert.match(panel,/Events can arrive out of order/);
+  await b.click('review-payment-case','missing');assert.match(b.elements['#toast'].textContent,/report has changed/);await b.click('review-payment-case','reviewed');assert.match(b.elements['#toast'].textContent,/report has changed/);
+  await b.click('review-payment-case','case-1');assert.match(b.elements['#modal-content'].innerHTML,/du_&lt;fixture&gt;/);const form=b.form('payment-case-form',{note:'Checked provider; assigned owner.'},{case:'case-1'});await b.submit(form);assert.equal(b.elements['#modal'].open,true);assert.equal(b.elements['#dialog-error'].textContent,'Retry later');assert.equal(form.values.note,'Checked provider; assigned owner.');fail=false;await b.submit(form);assert.equal(b.elements['#modal'].open,false);assert.equal(b.elements['#toast'].textContent,'Provider review recorded.');
+});
+
+test('Square matching and no-service forms preserve explicit staff choices and handle stale receipts',async()=>{
+  const p={id:'square-1',amount_cents:1000,refunded_cents:500,paid_at:Date.now(),status:'open',note:''};
+  const staff={...data.staff,posPayments:[p,{...p,id:'served',status:'serve',note:'Served <fixture>'},{...p,id:'dismissed',status:'dismiss',refunded_cents:0}],members:[...data.staff.members,{...data.staff.members[0],member_name:'',id:'unnamed'},{...data.staff.members[0],active:false,id:'inactive'}]};
+  const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:staff})})});await b.click('staff-tab','square');const panel=b.elements['#staff-panel'].innerHTML;assert.match(panel,/Needs matching/);assert.match(panel,/Service recorded/);assert.match(panel,/No bottle service/);assert.match(panel,/Served &lt;fixture&gt;/);assert.match(panel,/refunded in Square/);
+  await b.click('square-payment','missing');assert.match(b.elements['#toast'].textContent,/payment has changed/);await b.click('square-payment','served');assert.match(b.elements['#toast'].textContent,/payment has changed/);
+  await b.click('square-payment','square-1');assert.match(b.elements['#modal-content'].innerHTML,/Test &lt;bottle&gt;/);assert.match(b.elements['#modal-content'].innerHTML,/Member ·/);const form=b.form('square-payment-form',{action:'serve',bottleId:'bottle-1',ml:'90',note:'Guest and service confirmed.'},{payment:'square-1'});await b.submit(form);const write=b.requests.find(r=>r.url==='/api/staff/pos-payments/square-1');assert.deepEqual(write.body,{action:'serve',bottleId:'bottle-1',ml:90,note:'Guest and service confirmed.'});assert.equal(b.elements['#toast'].textContent,'Square payment handled.');
+  const emptyBrowser=await browser({path:'/staff/copper-room',handle:handler()});await emptyBrowser.click('staff-tab','square');assert.match(emptyBrowser.elements['#staff-panel'].innerHTML,/No Square payments yet/);
+});
+
+test('staff access displays escaped identities and confirms revocation with a reason',async()=>{
+  const staff={...data.staff,staffRoster:[{user_id:'staff-one',name:'<Staff>',role:'staff'},{user_id:'unnamed',name:'',role:'manager',is_self:1}]};
+  const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:staff})})});await b.click('staff-tab','access');assert.match(b.elements['#staff-panel'].innerHTML,/&lt;Staff&gt;/);assert.match(b.elements['#staff-panel'].innerHTML,/Staff member/);
+  await b.click('revoke-staff','missing');assert.match(b.elements['#toast'].textContent,/Staff access changed/);await b.click('revoke-staff','unnamed');assert.match(b.elements['#modal-content'].innerHTML,/This staff member/);await b.close();await b.click('revoke-staff','staff-one');assert.match(b.elements['#modal-content'].innerHTML,/&lt;Staff&gt;/);const form=b.form('revoke-staff-form',{reason:'No longer at venue.'},{user:'staff-one'});await b.submit(form);const write=b.requests.find(r=>r.url==='/api/staff/copper-room/access/staff-one/revoke');assert.deepEqual(write.body,{reason:'No longer at venue.'});assert.equal(b.elements['#toast'].textContent,'Venue access removed.');
 });

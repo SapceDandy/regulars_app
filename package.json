@@ -21,7 +21,8 @@
     "seed": "node --env-file-if-exists=.env scripts/seed.js",
     "backup": "node --env-file-if-exists=.env scripts/backup.js",
     "test:postgres": "REGULARS_TEST_DB=postgres node --experimental-vm-modules --experimental-test-module-mocks --test-concurrency=2 --test tests/*.test.js",
-    "test:coverage": "node --experimental-vm-modules --experimental-test-module-mocks --experimental-test-coverage --test-coverage-include='apps/**/*.js' --test-coverage-include='packages/**/*.js' --test-coverage-include='api/**/*.js' --test-coverage-include='scripts/seed.js' --test-coverage-include='scripts/backup.js' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/coverage-report.js --test-reporter-destination=coverage-summary.json --test tests/*.test.js"
+    "test:coverage": "node --experimental-vm-modules --experimental-test-module-mocks --experimental-test-coverage --test-coverage-include='apps/**/*.js' --test-coverage-include='packages/**/*.js' --test-coverage-include='api/**/*.js' --test-coverage-include='scripts/seed.js' --test-coverage-include='scripts/backup.js' --test-coverage-include='scripts/operator.js' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/coverage-report.js --test-reporter-destination=coverage-summary.json --test tests/*.test.js",
+    "operator": "node --env-file-if-exists=.env scripts/operator.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.0.2",

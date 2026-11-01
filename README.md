@@ -28,7 +28,7 @@ npm run test:coverage
 npm run test:postgres
 ```
 
-`test:coverage` requires 100% native V8 line, branch and function coverage for every application JavaScript file under `api/`, `apps/` and `packages/`, plus the seed and backup commands. It also fails if a runtime file is absent from the report. The generated `coverage-summary.json` is local and ignored by Git. Tests, dependencies and developer validation tools are outside this runtime scope. CI installs locked dependencies, enforces coverage and runs the PostgreSQL suite.
+`test:coverage` requires 100% native V8 line, branch and function coverage for every application JavaScript file under `api/`, `apps/` and `packages/`, plus the seed, backup and operator commands. It also fails if a runtime file is absent from the report. The generated `coverage-summary.json` is local and ignored by Git. Tests, dependencies and developer validation tools are outside this runtime scope. CI installs locked dependencies, enforces coverage and runs the PostgreSQL suite.
 
 Browser event tests execute the exact shipped ES module with small DOM doubles; they do not replace visual, accessibility or real-device testing. The suite uses Node 24 experimental VM-module and module-mocking flags only during tests. The PostgreSQL suite uses PGlite with two test workers to bound memory; disk backup and local-server process tests still use SQLite. Provider transports are mocked, and signing keys are temporary test fixtures. Real SMS, payment and Wallet delivery remain separate pilot gates.
 
@@ -47,7 +47,7 @@ Browser event tests execute the exact shipped ES module with small DOM doubles; 
 | Operator | Operating counts, campaign drafts/approval/copy links, sync/refund failures and retries |
 | Resilience | Local SQLite or hosted PostgreSQL, transactions, checkout holds, signature checks, idempotency, job retries |
 
-See [implementation status](docs/IMPLEMENTATION_STATUS.md) for important limits. A generic iframe and staff API do **not** mean Square, Toast, OpenTable, Resy or another vendor is integrated.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md) for important limits. Square has a signature-verified payment inbox with explicit staff bottle matching; its actual sandbox connection still needs verification. A generic iframe does not imply an integration with Toast, OpenTable, Resy or another vendor. See [operator and Square setup](OPERATIONS.md).
 
 ## Why a monorepo
 

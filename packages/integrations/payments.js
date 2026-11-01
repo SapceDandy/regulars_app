@@ -31,15 +31,27 @@ export class Payments {
   }
   async webhook(raw,signature) {
     const event=verifyStripeSignature(raw,signature,this.config.env.STRIPE_WEBHOOK_SECRET,this.app.now());
+    requireThat(event&&typeof event.id==='string'&&event.id.length>0&&typeof event.type==='string',400,'Invalid payment event.');
+    const report=async kind=>{
+      const o=event.data.object;
+      return this.app.recordPaymentCase({eventId:event.id,kind,reference:typeof o.id==='string'?o.id:event.id,paymentIntent:typeof o.payment_intent==='string'?o.payment_intent:null,orderId:typeof o.metadata?.order_id==='string'?o.metadata?.order_id:null,amount:Number.isSafeInteger(o.amount??o.amount_total)&&(o.amount??o.amount_total)>=0?(o.amount??o.amount_total):null,currency:typeof o.currency==='string'?o.currency:'',providerStatus:event.type});
+    };
+    requireThat(event.data?.object&&typeof event.data.object==='object',400,'Invalid payment event object.');
+    if(['charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_withdrawn','charge.dispute.funds_reinstated'].includes(event.type)) {
+      const d=event.data.object;
+      requireThat(typeof d.status==='string'&&typeof d.currency==='string',400,'Invalid dispute report.');
+      return this.app.recordPaymentCase({eventId:event.id,kind:'dispute',reference:d.id,paymentIntent:typeof d.payment_intent==='string'?d.payment_intent:null,amount:d.amount,currency:d.currency,providerStatus:d.status,dueAt:d.evidence_details?.due_by?d.evidence_details.due_by*1000:null});
+    }
+    try {
     if(event.type==='checkout.session.completed'||event.type==='checkout.session.async_payment_succeeded') {
       const o=event.data.object;
-      if(o.payment_status==='paid') return (await this.app.settle({eventId:event.id,orderId:o.metadata.order_id,amount:o.amount_total,currency:o.currency,paymentIntent:o.payment_intent,sessionId:o.id}));
+      if(o.payment_status==='paid') return (await this.app.settle({eventId:event.id,orderId:o.metadata?.order_id,amount:o.amount_total,currency:o.currency,paymentIntent:o.payment_intent,sessionId:o.id}));
     }
     if(event.type==='checkout.session.async_payment_failed'||event.type==='checkout.session.expired') {
       const session=event.data.object;
-      return this.s.transaction(async()=>{
+      return await this.s.transaction(async()=>{
         if(await this.s.get('SELECT id FROM payment_events WHERE id=?',event.id))return {duplicate:true};
-        const order=await this.s.get('SELECT * FROM orders WHERE id=?',session.metadata.order_id);requireThat(order,404,'Order not found.');
+        const order=await this.s.get('SELECT * FROM orders WHERE id=?',session.metadata?.order_id??null);requireThat(order,404,'Order not found.');
         requireThat(!order.stripe_session||order.stripe_session===session.id,409,'Payment does not match the held order.');
         if(order.state==='held') {await this.app.release(order.id,'cancelled');await this.app.audit(order.venue_id,null,'payment.failed',order.id,{eventType:event.type});}
         await this.s.run('INSERT INTO payment_events VALUES(?,?)',event.id,this.app.now());return {received:true};
@@ -47,9 +59,15 @@ export class Payments {
     }
     if(event.type==='charge.refunded') {
       const c=event.data.object;
-      return this.app.recordRefund({eventId:event.id,paymentIntent:c.payment_intent,orderId:c.metadata?.order_id,amount:c.amount,currency:c.currency,refundedAmount:c.amount_refunded});
+      const result=await this.app.recordRefund({eventId:event.id,paymentIntent:c.payment_intent,orderId:c.metadata?.order_id,amount:c.amount,currency:c.currency,refundedAmount:c.amount_refunded});
+      if(!await this.s.get('SELECT id FROM orders WHERE payment_intent=?',c.payment_intent))return report('unmatched_refund');
+      return result;
     }
     return {received:true};
+    } catch(error) {
+      if([404,409].includes(error.status))await report('payment_mismatch');
+      throw error;
+    }
   }
   async refund(orderId) {
     const o=(await this.s.get('SELECT * FROM orders WHERE id=?',orderId));

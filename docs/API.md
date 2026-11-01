@@ -63,11 +63,23 @@ The result is `{orderId,url,demo?}`. Live `url` is Stripe Checkout; demo `url` i
 
 The manager workspace includes `refundReviews` (open first, up to 100 records); ordinary staff receive an empty list. Partial refunds preserve benefits while awaiting review. A later increase reopens the review, and a confirmed full refund closes it. Recording a review saves an audited note; it sends no payment request and changes no entitlement. Customer order lists include `refunded_cents` but never manager notes. Manager collected-order totals subtract recorded partial refunds from orders still marked paid.
 
+Additional venue operations:
+
+| Method / route | Body / result | Access |
+| --- | --- | --- |
+| POST `/api/staff/payment-cases/:eventId` | `{note}` reviews one immutable provider report | Actual order's venue manager |
+| POST `/api/staff/pos-payments/:paymentId` | `{action:"serve",bottleId,ml,note}` or `{action:"dismiss",note}` | Payment venue staff |
+| POST `/api/staff/:venue/access/:userId/revoke` | `{reason}` revokes this venue role and all user sessions; cannot revoke self | Venue manager |
+
+Staff dashboards now include `posPayments` (pending first, up to 100); manager dashboards additionally include `paymentCases` and `staffRoster`. Dispute reports are immutable snapshots with provider references/status/deadlines; reviewing a report does not submit evidence or close a Stripe dispute. Every new report requires its own review, so out-of-order reports cannot silently overwrite a terminal state. Unmatched reports are visible through the privileged operator command, not to unrelated venue staff. See [the operator runbook](../OPERATIONS.md).
+
 These routes are a starting point for compatible POS integrations, **not** an unauthenticated vendor webhook. A real provider adapter must verify vendor signatures, map venue/staff/member/bottle identities, and reuse provider event IDs as retry keys. Never call staff endpoints from a public POS payload without a separate authenticated integration boundary.
 
 ## Provider endpoints
 
 `POST /api/webhooks/stripe` accepts the untouched raw JSON body and verifies `Stripe-Signature` with a bounded timestamp. It is exempt from browser Origin checks because the provider signs it.
+
+`POST /api/webhooks/square` verifies the raw body and configured notification URL with `x-square-hmacsha256-signature`, then checks the configured merchant and location. Completed payments enter the staff inbox, keyed by payment ID across multiple events. Non-completed payments do nothing. Cumulative refunded amounts only increase. No stock change occurs until an authenticated staff member explicitly records service; duplicate submissions cannot debit twice. Demo and synthetic preview ingress are disabled. This adapter does not create Square charges or refunds.
 
 `GET /api/wallet/apple/:membership` is owner-authenticated and returns `application/vnd.apple.pkpass`. `GET /api/wallet/google/:membership` is owner-authenticated and returns `{url}` for the signed Google save JWT.
 

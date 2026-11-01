@@ -140,8 +140,9 @@ export class Regulars {
   async settle({eventId,orderId,amount,currency,paymentIntent,sessionId}) {
     return (await this.s.transaction(async ()=>{
       if((await this.s.get('SELECT id FROM payment_events WHERE id=?',eventId))) return {duplicate:true};
-      const o=(await this.s.get('SELECT * FROM orders WHERE id=?',orderId));requireThat(o,404,'Order not found.');
+      const o=(await this.s.get('SELECT * FROM orders WHERE id=?',orderId??null));requireThat(o,404,'Order not found.');
       requireThat(o.amount_cents===amount && o.currency===currency && (!o.stripe_session||o.stripe_session===sessionId) && typeof paymentIntent==='string' && paymentIntent.length>0 && (!o.payment_intent||o.payment_intent===paymentIntent),409,'Payment does not match the held order.');
+      requireThat(!await this.s.get('SELECT id FROM orders WHERE payment_intent=? AND id!=?',paymentIntent,o.id),409,'Payment is already attached to another order.');
       if(['paid','refund_pending','refunded'].includes(o.state)) {(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {duplicate:true};}
       if(o.state!=='held'||o.expires_at<=this.now()) {
         (await this.release(o.id,'refund_pending'));(await this.s.run('UPDATE orders SET payment_intent=? WHERE id=?',paymentIntent,o.id));(await this.enqueue('refund',o.id));(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {refundPending:true};
@@ -220,6 +221,66 @@ export class Regulars {
       return {refundPending:true};
     }));
   }
+  async recordPaymentCase({eventId,kind,reference,paymentIntent=null,orderId=null,amount=null,currency='',providerStatus='',dueAt=null}) {
+    text(eventId,'provider event',200);text(reference,'provider reference',200);text(kind,'payment issue',100);
+    requireThat(amount===null||Number.isSafeInteger(amount)&&amount>=0,400,'Invalid provider amount.');
+    requireThat(dueAt===null||Number.isSafeInteger(dueAt)&&dueAt>0,400,'Invalid provider deadline.');
+    return this.s.transaction(async()=>{
+      if(await this.s.get('SELECT id FROM payment_cases WHERE id=?',eventId))return {duplicate:true};
+      // Prefer the existing payment binding over conflicting metadata. Unmatched reports remain operator-only.
+      const order=await this.s.get('SELECT id FROM orders WHERE payment_intent=?',paymentIntent)??await this.s.get('SELECT id FROM orders WHERE id=?',orderId);
+      await this.s.run('INSERT INTO payment_cases(id,kind,reference,payment_intent,order_id,amount_cents,currency,provider_status,due_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,kind,reference,paymentIntent,order?.id??null,amount,currency,providerStatus,dueAt,this.now());
+      return {received:true,reconcile:true};
+    });
+  }
+  async paymentCases(venueId) {
+    return this.s.all('SELECT c.*,o.venue_id,u.name customer_name FROM payment_cases c LEFT JOIN orders o ON o.id=c.order_id OR (c.order_id IS NULL AND o.payment_intent=c.payment_intent) LEFT JOIN users u ON u.id=o.user_id WHERE o.venue_id=? ORDER BY c.reviewed_at IS NOT NULL,c.created_at DESC LIMIT 100',venueId);
+  }
+  async reviewPaymentCase(actorId,caseId,input) {
+    return this.s.transaction(async()=>{
+      const c=await this.s.get('SELECT c.*,o.venue_id FROM payment_cases c LEFT JOIN orders o ON o.id=c.order_id OR (c.order_id IS NULL AND o.payment_intent=c.payment_intent) WHERE c.id=?',caseId);requireThat(c,404,'Payment report not found.');await this.staff(actorId,c.venue_id,true);
+      const note=text(input.note,'review note',1000);
+      if(c.reviewed_at!==null){requireThat(c.note===note,409,'This report has already been reviewed.');return {duplicate:true};}
+      await this.s.run('UPDATE payment_cases SET note=?,reviewed_by=?,reviewed_at=? WHERE id=?',note,actorId,this.now(),caseId);
+      await this.audit(c.venue_id,actorId,'payment.report_reviewed',caseId,{note});return {reviewed:true};
+    });
+  }
+  async revokeStaff(actorId,venueKey,userId,input) {
+    return this.s.transaction(async()=>{
+      const v=await this.venue(venueKey);await this.staff(actorId,v.id,true);const reason=text(input.reason,'revocation reason',200);
+      requireThat(actorId!==userId,409,'Ask another manager or the operator to change your access.');
+      const target=await this.s.get('SELECT role FROM staff WHERE venue_id=? AND user_id=?',v.id,userId);requireThat(target,404,'Staff access not found.');
+      await this.s.run('DELETE FROM staff WHERE venue_id=? AND user_id=?',v.id,userId);
+      await this.s.run('DELETE FROM sessions WHERE user_id=?',userId);
+      await this.audit(v.id,actorId,'staff.revoked',userId,{role:target.role,reason});return {revoked:true};
+    });
+  }
+  async recordSquarePayment({id:paymentId,venueId,amount,currency,createdAt,refundedAmount=0}) {
+    text(paymentId,'Square payment',200);integer(amount,0,Number.MAX_SAFE_INTEGER,'Square amount');integer(refundedAmount,0,amount,'Square refund');requireThat(currency==='USD'&&Number.isSafeInteger(createdAt)&&createdAt>0,400,'Invalid Square payment.');
+    return this.s.transaction(async()=>{
+      await this.venue(venueId);
+      const prior=await this.s.get('SELECT * FROM pos_payments WHERE id=?',paymentId);
+      if(prior){requireThat(prior.venue_id===venueId&&prior.amount_cents===amount&&prior.currency===currency,409,'Square payment changed. Operator reconciliation required.');
+        if(refundedAmount<=prior.refunded_cents)return {duplicate:true};
+        await this.s.run('UPDATE pos_payments SET refunded_cents=? WHERE id=?',refundedAmount,paymentId);return {received:true};
+      }
+      await this.s.run('INSERT INTO pos_payments(id,venue_id,amount_cents,currency,refunded_cents,paid_at,created_at) VALUES(?,?,?,?,?,?,?)',paymentId,venueId,amount,currency,refundedAmount,createdAt,this.now());return {received:true};
+    });
+  }
+  async resolveSquarePayment(actorId,paymentId,input) {
+    return this.s.transaction(async()=>{
+      const p=await this.s.get('SELECT * FROM pos_payments WHERE id=?',paymentId);requireThat(p,404,'Square payment not found.');await this.staff(actorId,p.venue_id);
+      requireThat(['serve','dismiss'].includes(input.action),400,'Choose service or no bottle service.');const note=text(input.note,'service note',200);
+      const bottleId=input.action==='serve'?text(input.bottleId,'bottle',100):null;const ml=input.action==='serve'?integer(input.ml,1,6000,'service amount'):null;
+      if(p.status!=='open'){requireThat(p.status===input.action&&p.bottle_id===bottleId&&p.served_ml===ml&&p.note===note,409,'This payment has already been handled.');return {duplicate:true};}
+      if(input.action==='serve'){
+        const b=await this.s.get('SELECT m.venue_id FROM bottles b JOIN memberships m ON m.id=b.membership_id WHERE b.id=?',bottleId);requireThat(b&&b.venue_id===p.venue_id,404,'Bottle not found at this venue.');
+        await this.adjustBottleInTransaction(actorId,bottleId,{deltaMl:-ml,reason:note},`square:${digest(paymentId)}`);
+      }
+      await this.s.run('UPDATE pos_payments SET status=?,bottle_id=?,served_ml=?,note=?,handled_by=?,handled_at=? WHERE id=?',input.action,bottleId,ml,note,actorId,this.now(),paymentId);
+      await this.audit(p.venue_id,actorId,'square.payment_handled',paymentId,{action:input.action,bottleId,ml,note});return {recorded:true};
+    });
+  }
   async joinQueue(userId,venueKey,partySize) {
     (await this.user(userId));const v=(await this.venue(venueKey));integer(partySize,1,12,'party size');
     return (await this.s.transaction(async ()=>{
@@ -258,7 +319,11 @@ export class Regulars {
     const members=(await Promise.all((await this.s.all('SELECT id FROM memberships WHERE venue_id=? ORDER BY ends_at DESC',v.id)).map(async m=>(await this.membershipSnapshot(m.id)))));
     const queue=(await this.s.all("SELECT q.*,u.name,u.phone FROM queue_entries q JOIN users u ON u.id=q.user_id LEFT JOIN orders o ON o.id=q.order_id WHERE q.venue_id=? AND q.state IN('waiting','called','held') ORDER BY CASE q.lane WHEN 'priority' THEN 0 ELSE 1 END,CASE q.lane WHEN 'priority' THEN coalesce(o.created_at,q.created_at) ELSE q.created_at END",v.id));
     const report=role.role==='manager'?{paidCents:(await this.s.get("SELECT CAST(coalesce(sum(o.amount_cents-coalesce(r.refunded_cents,0)),0) AS BIGINT) n FROM orders o LEFT JOIN refund_reviews r ON r.order_id=o.id WHERE o.venue_id=? AND o.state='paid'",v.id)).n,activeMembers:members.filter(m=>m.active).length,confirmed:reservations.filter(r=>r.state==='confirmed').length,attended:reservations.filter(r=>r.state==='attended').length,bottleActions:(await this.s.get('SELECT count(*) n FROM bottle_log bl JOIN bottles b ON b.id=bl.bottle_id JOIN memberships m ON m.id=b.membership_id WHERE m.venue_id=?',v.id)).n,pendingJobs:(await this.s.get("SELECT count(*) n FROM outbox WHERE status!='done' AND (subject_id IN(SELECT id FROM memberships WHERE venue_id=?) OR subject_id IN(SELECT id FROM orders WHERE venue_id=?))",v.id,v.id)).n}:null;
-    return {venue:v,role:role.role,members,reservations,queue,report,refundReviews:role.role==='manager'?await this.s.all("SELECT r.*,o.amount_cents,o.kind,o.state order_state,u.name customer_name FROM refund_reviews r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id WHERE o.venue_id=? ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.updated_at DESC LIMIT 100",v.id):[],campaigns:role.role==='manager'?(await this.s.all('SELECT * FROM campaigns WHERE venue_id=? ORDER BY created_at DESC',v.id)):[]};
+    return {venue:v,role:role.role,members,reservations,queue,report,
+      paymentCases:role.role==='manager'?await this.paymentCases(v.id):[],
+      staffRoster:role.role==='manager'?await this.s.all('SELECT s.user_id,s.role,u.name,CASE WHEN s.user_id=? THEN 1 ELSE 0 END is_self FROM staff s JOIN users u ON u.id=s.user_id WHERE s.venue_id=? ORDER BY u.name',actorId,v.id):[],
+      posPayments:await this.s.all("SELECT * FROM pos_payments WHERE venue_id=? ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,created_at DESC LIMIT 100",v.id),
+      refundReviews:role.role==='manager'?await this.s.all("SELECT r.*,o.amount_cents,o.kind,o.state order_state,u.name customer_name FROM refund_reviews r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id WHERE o.venue_id=? ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.updated_at DESC LIMIT 100",v.id):[],campaigns:role.role==='manager'?(await this.s.all('SELECT * FROM campaigns WHERE venue_id=? ORDER BY created_at DESC',v.id)):[]};
   }
   async checkIn(actorId,rid,action) {
     return (await this.s.transaction(async ()=>{
@@ -278,21 +343,23 @@ export class Regulars {
     }));
   }
   async addBottle(actorId,mid,input,key) {
+    return this.s.transaction(async()=>{
     const m=(await this.s.get('SELECT * FROM memberships WHERE id=?',mid));requireThat(m,404,'Membership not found.');(await this.staff(actorId,m.venue_id));
     const name=text(input.name,'bottle name',80);const capacity=integer(input.capacityMl,50,6000,'bottle size');text(key,'retry key',100);
-    return (await this.s.transaction(async ()=>{
       const prior=(await this.s.get('SELECT b.* FROM bottle_log bl JOIN bottles b ON b.id=bl.bottle_id WHERE bl.idempotency_key=?',`${m.venue_id}:${key}`));if(prior) {requireThat(prior.membership_id===mid,409,'Retry key belongs to another member.');return prior;}
       requireThat(m.status==='active'&&m.ends_at>this.now(),409,'Membership is not active.');
       requireThat((await this.s.get("SELECT id FROM locker_allocations WHERE membership_id=? AND state='active' AND starts_at<=? AND ends_at>?",mid,this.now(),this.now())),409,'An active locker is required for bottle storage.');
       const bid=id();(await this.s.run('INSERT INTO bottles VALUES(?,?,?,?,?)',bid,mid,name,capacity,capacity));
       (await this.s.run('INSERT INTO bottle_log VALUES(?,?,?,?,?,?,?)',id(),bid,actorId,capacity,'Bottle received by venue staff',this.now(),`${m.venue_id}:${key}`));(await this.touch(mid));(await this.audit(m.venue_id,actorId,'bottle.received',bid));return (await this.s.get('SELECT * FROM bottles WHERE id=?',bid));
-    }));
+    });
   }
   async adjustBottle(actorId,bid,input,key) {
+    return this.s.transaction(()=>this.adjustBottleInTransaction(actorId,bid,input,key));
+  }
+  async adjustBottleInTransaction(actorId,bid,input,key) {
     const b=(await this.s.get('SELECT b.*,m.venue_id,m.status,m.ends_at FROM bottles b JOIN memberships m ON m.id=b.membership_id WHERE b.id=?',bid));requireThat(b,404,'Bottle not found.');(await this.staff(actorId,b.venue_id));
     const amount=integer(input.deltaMl,-6000,6000,'stock adjustment');requireThat(amount!==0,400,'Stock adjustment must be nonzero.');text(key,'retry key',100);
     const reason=text(input.reason,'service or correction reason',200);
-    return (await this.s.transaction(async ()=>{
       const prior=(await this.s.get('SELECT * FROM bottle_log WHERE idempotency_key=?',`${b.venue_id}:${key}`));if(prior) {requireThat(prior.bottle_id===bid&&prior.delta_ml===amount,409,'Retry key belongs to another action.');return {duplicate:true};}
       const current=(await this.s.get('SELECT remaining_ml FROM bottles WHERE id=?',bid)).remaining_ml;
       if(amount<0) {
@@ -303,7 +370,6 @@ export class Regulars {
       if(amount>0) (await this.staff(actorId,b.venue_id,true));
       (await this.s.run('UPDATE bottles SET remaining_ml=remaining_ml+? WHERE id=?',amount,bid));
       (await this.s.run('INSERT INTO bottle_log VALUES(?,?,?,?,?,?,?)',id(),bid,actorId,amount,reason,this.now(),`${b.venue_id}:${key}`));(await this.touch(b.membership_id));(await this.audit(b.venue_id,actorId,'bottle.adjusted',bid,{deltaMl:amount,reason}));return {remainingMl:current+amount};
-    }));
   }
   async answer(venueKey,question) {
     const v=(await this.venue(venueKey));const q=text(question,'question',300).toLowerCase();

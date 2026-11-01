@@ -52,6 +52,6 @@ test('async failure and checkout expiry release only matching unpaid inventory a
 test('refund metadata is propagated to the payment and unknown external charges do not touch other orders',async t=>{
   const f=await setup(t),o=await f.ticket();let fields;f.p.request=async(url,options)=>{fields=options.body;return{json:async()=>({id:`cs_${o.id}`,url:'https://checkout.stripe.com/fixture'})};};await f.p.checkout(o);
   assert.equal(fields.get('payment_intent_data[metadata][order_id]'),o.id);assert.equal(fields.has('payment_method_types[0]'),false);
-  assert.deepEqual(await deliver(f,'charge.refunded',{payment_intent:'unrelated',amount:500,amount_refunded:500,currency:'usd'},'unrelated'),{received:true});
+  assert.deepEqual(await deliver(f,'charge.refunded',{payment_intent:'unrelated',amount:500,amount_refunded:500,currency:'usd'},'unrelated'),{received:true,reconcile:true});
   assert.equal((await f.app.order(f.uid,o.id)).state,'held');
 });

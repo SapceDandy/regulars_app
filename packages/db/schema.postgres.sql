@@ -125,3 +125,17 @@ CREATE TABLE IF NOT EXISTS leads(
 CREATE TABLE IF NOT EXISTS job_leases(
  job_id TEXT PRIMARY KEY REFERENCES outbox(id), token TEXT NOT NULL, expires_at BIGINT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS payment_cases(
+ id TEXT PRIMARY KEY, kind TEXT NOT NULL, reference TEXT NOT NULL, payment_intent TEXT,
+ order_id TEXT REFERENCES orders(id), amount_cents BIGINT, currency TEXT NOT NULL,
+ provider_status TEXT NOT NULL, due_at BIGINT, created_at BIGINT NOT NULL,
+ note TEXT NOT NULL DEFAULT '', reviewed_by TEXT REFERENCES users(id), reviewed_at BIGINT
+);
+CREATE TABLE IF NOT EXISTS pos_payments(
+ id TEXT PRIMARY KEY, venue_id TEXT NOT NULL REFERENCES venues(id), amount_cents BIGINT NOT NULL,
+ currency TEXT NOT NULL, refunded_cents BIGINT NOT NULL DEFAULT 0, paid_at BIGINT NOT NULL, created_at BIGINT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'open' CHECK(status IN('open','serve','dismiss')),
+ bottle_id TEXT REFERENCES bottles(id), served_ml BIGINT,
+ note TEXT NOT NULL DEFAULT '', handled_by TEXT REFERENCES users(id), handled_at BIGINT
+);

@@ -8,6 +8,7 @@ import { openPostgresStore } from '../../packages/db/postgres.js';
 import { seed } from '../../packages/db/seed.js';
 import { Regulars } from '../../packages/core/regulars.js';
 import { Auth } from '../../packages/integrations/auth.js';
+import {Square} from '../../packages/integrations/square.js';
 import { Payments } from '../../packages/integrations/payments.js';
 import { Wallets } from '../../packages/integrations/wallets.js';
 import { Jobs } from '../../packages/integrations/jobs.js';
@@ -33,7 +34,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
   }
   requireThat(config.mode!=='live'||(await store.get('SELECT count(*) n FROM venues WHERE demo=1')).n===0,500,'Use a fresh live database; demo venues cannot accept live payments.');
   if(seedData)(await seed(store,{mode:config.mode,configPath:config.env.VENUE_CONFIG_PATH,configJson:config.env.VENUE_CONFIG_JSON,now:now()}));
-  const app=new Regulars(store,{now});const auth=new Auth(store,config,{now,...(request?{request}:{})});const payments=new Payments(store,app,config,{...(request?{request}:{})});const wallets=new Wallets(store,app,config,{...(request?{request}:{})});const jobs=new Jobs(store,app,{wallets,payments});
+  const app=new Regulars(store,{now});const auth=new Auth(store,config,{now,...(request?{request}:{})});const payments=new Payments(store,app,config,{...(request?{request}:{})});const wallets=new Wallets(store,app,config,{...(request?{request}:{})});const jobs=new Jobs(store,app,{wallets,payments});const square=new Square(app,config);
   const handler=async(req,res)=>{
     const requestId=id();
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
@@ -44,7 +45,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
     const send=(status,data,headers={})=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8',...headers});res.end(data===undefined?'':JSON.stringify(data));};
     try {
       const url=new URL(req.url,config.origin);const path=url.pathname;const method=req.method;const ip=clientAddress(req,config);
-      const isApple=path.startsWith('/api/wallet/apple/');const isStripe=path==='/api/webhooks/stripe';
+      const isApple=path.startsWith('/api/wallet/apple/');const isStripe=path==='/api/webhooks/stripe'||path==='/api/webhooks/square';
       if(!['GET','HEAD'].includes(method)&&!isApple&&!isStripe) {
         requireThat(req.headers.origin===config.origin,403,'This action must come from the Regulars site.');
         requireThat(String(req.headers['content-type']??'').startsWith('application/json'),415,'Use application/json.');
@@ -87,6 +88,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
       }
       if(method==='POST'&&path==='/api/queue') {const uid=(await signedIn());const b=jsonBody(await readBody(req));return send(201,(await app.joinQueue(uid,b.venueId,b.partySize)));}
       if(method==='POST'&&(match=path.match(/^\/api\/queue\/([\w-]+)\/leave$/)))return send(200,(await app.leaveQueue((await signedIn()),match[1])));
+      if(method==='POST'&&path==='/api/webhooks/square')return send(200,await square.webhook(await readBody(req),req.headers['x-square-hmacsha256-signature']));
       if(method==='POST'&&path==='/api/webhooks/stripe') {requireThat(config.mode==='live',404,'Not found.');return send(200,(await payments.webhook(await readBody(req),req.headers['stripe-signature'])));}
       if(method==='GET'&&(match=path.match(/^\/api\/wallet\/(apple|google)\/([\w-]+)$/))) {
         (await app.cleanup());(await wallets.assertOwner((await signedIn()),match[2]));
@@ -114,6 +116,9 @@ export async function createApplication({config=configuration(),store,now=()=>Da
         if(method==='POST'&&path==='/api/wallet/apple/v1/log') {await readBody(req);return send(200);}
       }
       if(method==='GET'&&(match=path.match(/^\/api\/staff\/([a-z0-9-]+)$/)))return send(200,(await app.staffDashboard((await signedIn()),match[1])));
+      if(method==='POST'&&(match=path.match(/^\/api\/staff\/payment-cases\/([\w-]+)$/)))return send(200,await app.reviewPaymentCase(await signedIn(),match[1],jsonBody(await readBody(req))));
+      if(method==='POST'&&(match=path.match(/^\/api\/staff\/pos-payments\/([\w-]+)$/)))return send(200,await app.resolveSquarePayment(await signedIn(),match[1],jsonBody(await readBody(req))));
+      if(method==='POST'&&(match=path.match(/^\/api\/staff\/([a-z0-9-]+)\/access\/([\w-]+)\/revoke$/)))return send(200,await app.revokeStaff(await signedIn(),match[1],match[2],jsonBody(await readBody(req))));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/refund-reviews\/([\w-]+)$/)))return send(200,await app.reviewRefund(await signedIn(),match[1],jsonBody(await readBody(req))));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/([a-z0-9-]+)\/lookup$/))) {const uid=(await signedIn());const b=jsonBody(await readBody(req));return send(200,(await app.memberForStaff(uid,match[1],text(b.token,'pass code',100))));}
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/reservations\/([\w-]+)$/)))return send(200,(await app.checkIn((await signedIn()),match[1],jsonBody(await readBody(req)).action)));
@@ -121,7 +126,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/members\/([\w-]+)\/bottles$/)))return send(201,(await app.addBottle((await signedIn()),match[1],jsonBody(await readBody(req)),req.headers['idempotency-key'])));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/bottles\/([\w-]+)$/)))return send(200,(await app.adjustBottle((await signedIn()),match[1],jsonBody(await readBody(req)),req.headers['idempotency-key'])));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/campaigns\/([\w-]+)\/approve$/))) {
-        const uid=(await signedIn());const c=(await store.get('SELECT * FROM campaigns WHERE id=?',match[1]));requireThat(c,404,'Campaign not found.');(await app.staff(uid,c.venue_id,true));(await store.transaction(async ()=>{(await store.run("UPDATE campaigns SET state='approved' WHERE id=?",c.id));(await app.audit(c.venue_id,uid,'campaign.approved',c.id));}));return send(200,{approved:true});
+        const uid=(await signedIn());const c=(await store.get('SELECT * FROM campaigns WHERE id=?',match[1]));requireThat(c,404,'Campaign not found.');(await store.transaction(async ()=>{await app.staff(uid,c.venue_id,true);(await store.run("UPDATE campaigns SET state='approved' WHERE id=?",c.id));(await app.audit(c.venue_id,uid,'campaign.approved',c.id));}));return send(200,{approved:true});
       }
       if(method==='POST'&&(match=path.match(/^\/api\/venues\/([a-z0-9-]+)\/ask$/))) {(await auth.limit(`question:${ip}`,30,60_000));return send(200,(await app.answer(match[1],jsonBody(await readBody(req)).question)));}
       if(method==='POST'&&path==='/api/partners') {
@@ -131,7 +136,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
         const v=(await app.venue(match[1]));(await app.staff((await signedIn()),v.id,true));return send(200,(await store.all("SELECT id,kind,subject_id,attempts,status,last_error FROM outbox WHERE status!='done' AND (subject_id IN(SELECT id FROM memberships WHERE venue_id=?) OR subject_id IN(SELECT id FROM orders WHERE venue_id=?))",v.id,v.id)));
       }
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/jobs\/([\w-]+)\/retry$/))) {
-        const uid=(await signedIn());const j=(await store.get('SELECT * FROM outbox WHERE id=?',match[1]));requireThat(j,404,'Job not found.');const subject=(await store.get('SELECT venue_id FROM memberships WHERE id=?',j.subject_id))??(await store.get('SELECT venue_id FROM orders WHERE id=?',j.subject_id));requireThat(subject,404,'Job subject not found.');(await app.staff(uid,subject.venue_id,true));(await store.run("UPDATE outbox SET status='pending',attempts=0,next_at=? WHERE id=?",now(),j.id));return send(200,{queued:true});
+        const uid=(await signedIn());return send(200,await store.transaction(async()=>{const j=(await store.get('SELECT * FROM outbox WHERE id=?',match[1]));requireThat(j,404,'Job not found.');const subject=(await store.get('SELECT venue_id FROM memberships WHERE id=?',j.subject_id))??(await store.get('SELECT venue_id FROM orders WHERE id=?',j.subject_id));requireThat(subject,404,'Job subject not found.');(await app.staff(uid,subject.venue_id,true));(await store.run("UPDATE outbox SET status='pending',attempts=0,next_at=? WHERE id=?",now(),j.id));return {queued:true};}));
       }
       if(path.startsWith('/api/'))return send(404,{error:'Not found.'});
       if(method!=='GET'&&method!=='HEAD')return send(405,{error:'Method not supported.'});
