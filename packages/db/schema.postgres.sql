@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS audit(
  action TEXT NOT NULL, subject_id TEXT NOT NULL, detail TEXT NOT NULL, at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS payment_events(id TEXT PRIMARY KEY, at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS refund_reviews(
+ order_id TEXT PRIMARY KEY REFERENCES orders(id), refunded_cents BIGINT NOT NULL CHECK(refunded_cents>0),
+ status TEXT NOT NULL CHECK(status IN('open','reviewed','closed')), note TEXT NOT NULL DEFAULT '',
+ reviewed_by TEXT REFERENCES users(id), reviewed_at BIGINT, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS outbox(
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, subject_id TEXT NOT NULL, payload TEXT NOT NULL,
  attempts BIGINT NOT NULL DEFAULT 0, next_at BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',

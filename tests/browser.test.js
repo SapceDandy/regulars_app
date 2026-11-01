@@ -183,3 +183,31 @@ test('refresh fences responses and ignores writes, drafts, concurrent refreshes 
 test('live public pages omit synthetic notices and use operating policies',async()=>{
   for(const path of ['/','/privacy','/terms']){const b=await browser({path,config:{mode:'live'},handle:handler()});assert.doesNotMatch(html(b),/sample venues and game schedules|Demo policy/);if(path!=='/')assert.match(html(b),/venue-specific membership and booking terms/);}
 });
+
+test('payment reviews show exact refund balances, escape notes and keep failed review drafts open',async()=>{
+  const review={order_id:'review-order',customer_name:'Test <guest>',kind:'ticket',order_state:'paid',amount_cents:4500,refunded_cents:500,status:'open',note:''};let reject=true;
+  const staff={...data.staff,refundReviews:[review,{...review,order_id:'reviewed',status:'reviewed',customer_name:'',note:'Checked <script>fixture</script>'},{...review,order_id:'full',status:'closed',refunded_cents:4500}]};
+  const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:staff}),'POST /api/staff/refund-reviews/review-order':()=>reject?{status:409,data:{error:'The refunded amount changed.'}}:{data:{reviewed:true}}})});
+  assert.match(html(b),/A partial refund needs manager review/);await b.click('staff-tab','refunds');let panel=b.elements['#staff-panel'].innerHTML;
+  assert.match(panel,/\$5 refunded of \$45 · \$40 after refund/);assert.match(panel,/Fully refunded/);assert.match(panel,/Reviewed/);assert.match(panel,/&lt;script&gt;/);assert.doesNotMatch(panel,/<script>|Test <guest>/);
+  await b.click('review-refund','review-order');assert.match(b.elements['#modal-content'].innerHTML,/Saving this note does not send a refund/);
+  const form=b.form('refund-review-form',{note:'Guest confirmed the adjustment.'},{order:'review-order',refunded:'500'});await b.submit(form);assert.equal(b.elements['#modal'].open,true);assert.match(b.elements['#dialog-error'].textContent,/amount changed/);assert.equal(last(b).body.refundedCents,500);
+  reject=false;review.status='reviewed';await b.submit(form);assert.equal(b.elements['#modal'].open,false);assert.equal(b.elements['#toast'].textContent,'Refund review recorded.');
+  await b.click('review-refund','review-order');assert.match(b.elements['#toast'].textContent,/review has changed/);await b.click('review-refund','missing');assert.match(b.elements['#toast'].textContent,/review has changed/);
+  const empty=await browser({path:'/staff/copper-room',handle:handler()});await empty.click('staff-tab','refunds');assert.match(empty.elements['#staff-panel'].innerHTML,/No payment reviews/);
+  const unnamed=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:{...data.staff,refundReviews:[{...review,status:'open',customer_name:''}]}})})});await unnamed.click('review-refund','review-order');assert.match(unnamed.elements['#modal-content'].innerHTML,/for Guest/);
+});
+
+test('customer purchases show partial refunds without exposing manager review notes',async()=>{
+  const o=data.account.orders[0],account={...data.account,orders:[{...o,state:'paid',amount_cents:4500,refunded_cents:500},{...o,state:'refunded',amount_cents:4500,refunded_cents:4500}]};
+  const b=await browser({path:'/account',handle:handler({'GET /api/account':()=>({data:account})})});assert.match(html(b),/\$5 refunded · \$40 paid after refund/);assert.doesNotMatch(html(b),/\$45 refunded · \$0 paid after refund/);
+});
+
+test('slow sync responses cannot replace a newer staff tab or refreshed staff data',async()=>{
+  let resolve;const b=await browser({path:'/staff/copper-room',handle:handler({'GET /api/staff/copper-room':()=>({data:{...data.staff}}),'GET /api/staff/copper-room/jobs':()=>new Promise(r=>{resolve=r;})})});
+  const sync=b.click('staff-tab','sync');await Promise.resolve();await b.click('staff-tab','refunds');resolve({data:[{id:'old',kind:'refund',status:'pending',attempts:1}]});await sync;assert.match(b.elements['#staff-panel'].innerHTML,/Payment reviews/);assert.doesNotMatch(b.elements['#staff-panel'].innerHTML,/old/);
+  const pending=b.click('staff-tab','sync');await Promise.resolve();const oldResolve=resolve;const refresh=b.refresh();await new Promise(r=>setImmediate(r));resolve({data:[]});await refresh;oldResolve({data:[{id:'stale',kind:'refund',status:'pending',attempts:1}]});await pending;assert.doesNotMatch(b.elements['#staff-panel'].innerHTML,/stale/);
+  const detached=b.click('staff-tab','sync');await Promise.resolve();b.elements['#staff-panel'].isConnected=false;resolve({data:[]});await detached;
+  b.elements['#staff-panel'].isConnected=true;const failure=b.click('staff-tab','sync');await Promise.resolve();await b.click('staff-tab','refunds');resolve({status:503,data:{error:'Obsolete sync failure'}});await failure;assert.doesNotMatch(b.elements['#toast'].textContent,/Obsolete/);
+  const current=b.click('staff-tab','sync');await Promise.resolve();resolve({status:503,data:{error:'Current sync failure'}});await current;assert.equal(b.elements['#toast'].textContent,'Current sync failure');
+});

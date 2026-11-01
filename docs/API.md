@@ -59,6 +59,9 @@ The result is `{orderId,url,demo?}`. Live `url` is Stripe Checkout; demo `url` i
 | POST `/api/staff/campaigns/:id/approve` | Approve reviewed campaign facts/copy | Venue manager |
 | GET `/api/staff/:venue/jobs` | Unfinished Wallet/refund delivery | Venue manager |
 | POST `/api/staff/jobs/:id/retry` | Reset failed delivery for retry | Subject's venue manager |
+| POST `/api/staff/refund-reviews/:orderId` | `{refundedCents,note}` records review of the displayed cumulative refund; stale amounts return 409 | Order's venue manager |
+
+The manager workspace includes `refundReviews` (open first, up to 100 records); ordinary staff receive an empty list. Partial refunds preserve benefits while awaiting review. A later increase reopens the review, and a confirmed full refund closes it. Recording a review saves an audited note; it sends no payment request and changes no entitlement. Customer order lists include `refunded_cents` but never manager notes. Manager collected-order totals subtract recorded partial refunds from orders still marked paid.
 
 These routes are a starting point for compatible POS integrations, **not** an unauthenticated vendor webhook. A real provider adapter must verify vendor signatures, map venue/staff/member/bottle identities, and reuse provider event IDs as retry keys. Never call staff endpoints from a public POS payload without a separate authenticated integration boundary.
 

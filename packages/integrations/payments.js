@@ -47,27 +47,7 @@ export class Payments {
     }
     if(event.type==='charge.refunded') {
       const c=event.data.object;
-      // Partial external refunds require manager reconciliation; never revoke all benefits silently.
-      if(c.amount_refunded!==c.amount) return {reconcile:true};
-      return this.s.transaction(async ()=>{
-        if(await this.s.get('SELECT id FROM payment_events WHERE id=?',event.id))return {duplicate:true};
-        // Charge metadata comes from Checkout's PaymentIntent, including when a refund arrives first.
-        const order=await this.s.get('SELECT * FROM orders WHERE payment_intent=?',c.payment_intent)??await this.s.get('SELECT * FROM orders WHERE id=?',c.metadata?.order_id??null);
-        if(!order)return {received:true};
-        requireThat(c.amount===order.amount_cents&&c.currency===order.currency&&typeof c.payment_intent==='string'&&c.payment_intent.length>0&&(!order.payment_intent||order.payment_intent===c.payment_intent)&&(!c.metadata?.order_id||c.metadata.order_id===order.id),409,'Refund does not match the order.');
-        await this.s.run('INSERT INTO payment_events VALUES(?,?)',event.id,this.app.now());
-        if(order.state==='refunded')return {duplicate:true};
-        await this.app.release(order.id,'refunded');
-        await this.s.run('UPDATE orders SET payment_intent=? WHERE id=?',c.payment_intent,order.id);
-        (await this.s.run("UPDATE reservations SET state='cancelled' WHERE order_id=? AND state!='attended'",order.id));
-        (await this.s.run("UPDATE queue_entries SET lane='standard',state='waiting',order_id=NULL WHERE order_id=? AND state IN('waiting','held')",order.id));
-        const m=(await this.s.get('SELECT id FROM memberships WHERE order_id=?',order.id));
-        if(m) {(await this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",m.id));(await this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",m.id));}
-        // Ticket refunds also change the next reservation displayed on a pass.
-        for(const member of await this.s.all('SELECT id FROM memberships WHERE user_id=? AND venue_id=?',order.user_id,order.venue_id))await this.app.touch(member.id);
-        (await this.app.audit(order.venue_id,null,'payment.refunded',order.id));
-        return {received:true};
-      });
+      return this.app.recordRefund({eventId:event.id,paymentIntent:c.payment_intent,orderId:c.metadata?.order_id,amount:c.amount,currency:c.currency,refundedAmount:c.amount_refunded});
     }
     return {received:true};
   }
@@ -79,6 +59,6 @@ export class Payments {
       const refund=await this.stripe('refunds',{payment_intent:o.payment_intent},`refund:${o.id}`);
       requireThat(refund.status==='succeeded',409,'Refund is not settled yet. Await the payment webhook or reconcile with the provider.');
     }
-    (await this.s.run("UPDATE orders SET state='refunded' WHERE id=? AND state='refund_pending'",orderId));
+    await this.app.completeRefund(orderId);
   }
 }

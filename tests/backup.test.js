@@ -28,6 +28,8 @@ test('online SQLite backup restores memberships, stock, bookings, audit and pend
     const m=await f.member();const bottle=await f.app.addBottle(f.manager,m.id,{name:'Restore fixture',capacityMl:750},'receive');
     await f.app.adjustBottle(f.manager,bottle.id,{deltaMl:-45,reason:'Service'},'pour');
     const order=await f.ticket();await f.paid(order);
+    await f.app.recordRefund({eventId:'restore-partial',paymentIntent:`pi_${order.id}`,orderId:order.id,amount:order.amount_cents,currency:'usd',refundedAmount:500});
+    await f.app.reviewRefund(f.manager,order.id,{refundedCents:500,note:'Synthetic reconciliation before backup.'});
     const expected=await f.app.account(f.uid);
     const result=run(dir,source);assert.equal(result.status,0,result.stderr);
     const backup=join(dir,'backups',readdirSync(join(dir,'backups'))[0]);
@@ -38,6 +40,7 @@ test('online SQLite backup restores memberships, stock, bookings, audit and pend
     assert.deepEqual(await app.account(f.uid),expected);
     assert.equal((await app.membershipSnapshot(m.id)).bottles[0].remaining_ml,705);
     for(const table of ['audit','bottle_log','outbox','payment_events'])assert.deepEqual(await restored.all(`SELECT * FROM ${table} ORDER BY id`),await f.s.all(`SELECT * FROM ${table} ORDER BY id`));
+    assert.deepEqual(await restored.all('SELECT * FROM refund_reviews ORDER BY order_id'),await f.s.all('SELECT * FROM refund_reviews ORDER BY order_id'));
     await assert.rejects(app.createOrder(f.other,{kind:'ticket',venueId:'v_copper',eventId:f.games[0].id,resourceId:f.resource.id,partySize:2},'after-restore'),error=>error.status===409);
   }finally{if(restored)await restored.close();await f.s.close();}
 });

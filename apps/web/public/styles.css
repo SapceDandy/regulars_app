@@ -19,3 +19,5 @@
 
 /* Keep all staff destinations visible on phones. */
 @media(max-width:600px){.staff-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;border:0;overflow:visible;white-space:normal}.staff-tabs button{min-height:48px;padding:12px 9px;border:1px solid var(--line);border-radius:8px;text-align:center}.staff-tabs button.active{background:var(--green);color:white;border-color:var(--green)}.staff-tabs button:last-child:nth-child(odd){grid-column:1/-1}.order-row{flex-wrap:wrap}.order-row>div{flex:1;min-width:140px}.order-row>.quiet-button{flex-basis:100%;text-align:left;min-height:44px}}
+
+.refund-review p{overflow-wrap:anywhere;white-space:pre-wrap}

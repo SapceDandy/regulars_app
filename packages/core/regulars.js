@@ -160,6 +160,50 @@ export class Regulars {
       (await this.audit(o.venue_id,o.user_id,'payment.confirmed',o.id));(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {paid:true};
     }));
   }
+  async recordRefund({eventId,paymentIntent,orderId,amount,currency,refundedAmount}) {
+    requireThat(typeof paymentIntent==='string'&&paymentIntent.length>0,409,'Refund does not match the order.');
+    return this.s.transaction(async()=>{
+      if(await this.s.get('SELECT id FROM payment_events WHERE id=?',eventId))return {duplicate:true};
+      const o=await this.s.get('SELECT * FROM orders WHERE payment_intent=?',paymentIntent)??await this.s.get('SELECT * FROM orders WHERE id=?',orderId??null);
+      if(!o)return {received:true};
+      requireThat(amount===o.amount_cents&&currency===o.currency&&(!o.payment_intent||o.payment_intent===paymentIntent)&&(!orderId||orderId===o.id)&&Number.isSafeInteger(refundedAmount)&&refundedAmount>0&&refundedAmount<=amount,409,'Refund does not match the order.');
+      await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now());
+      if(o.state==='refunded')return {duplicate:true};
+      const prior=await this.s.get('SELECT * FROM refund_reviews WHERE order_id=?',o.id);
+      if(prior&&prior.refunded_cents>=refundedAmount)return {duplicate:true};
+      await this.s.run('UPDATE orders SET payment_intent=? WHERE id=?',paymentIntent,o.id);
+      if(refundedAmount<amount) {
+        // Stripe reports a cumulative amount: a replay or older snapshot must not add it twice.
+        await this.s.run("INSERT INTO refund_reviews(order_id,refunded_cents,status,created_at,updated_at) VALUES(?,?,'open',?,?) ON CONFLICT(order_id) DO UPDATE SET refunded_cents=excluded.refunded_cents,status='open',note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=excluded.updated_at",o.id,refundedAmount,this.now(),this.now());
+        await this.audit(o.venue_id,null,'payment.partial_refund',o.id,{refundedCents:refundedAmount});return {reconcile:true};
+      }
+      await this.release(o.id,'refunded');
+      await this.s.run("UPDATE refund_reviews SET refunded_cents=?,status='closed',updated_at=? WHERE order_id=?",amount,this.now(),o.id);
+      await this.s.run("UPDATE reservations SET state='cancelled' WHERE order_id=? AND state!='attended'",o.id);
+      await this.s.run("UPDATE queue_entries SET lane='standard',state='waiting',order_id=NULL WHERE order_id=? AND state IN('waiting','held')",o.id);
+      const member=await this.s.get('SELECT id FROM memberships WHERE order_id=?',o.id);
+      if(member) {await this.s.run("UPDATE memberships SET status='cancelled' WHERE id=?",member.id);await this.s.run("UPDATE locker_allocations SET state='released' WHERE membership_id=?",member.id);}
+      for(const m of await this.s.all('SELECT id FROM memberships WHERE user_id=? AND venue_id=?',o.user_id,o.venue_id))await this.touch(m.id);
+      await this.audit(o.venue_id,null,'payment.refunded',o.id);return {received:true};
+    });
+  }
+  async completeRefund(orderId) {
+    return this.s.transaction(async()=>{
+      const o=await this.s.get('SELECT * FROM orders WHERE id=?',orderId);if(!o||o.state!=='refund_pending')return;
+      await this.s.run("UPDATE orders SET state='refunded' WHERE id=?",orderId);
+      await this.s.run("UPDATE refund_reviews SET refunded_cents=?,status='closed',updated_at=? WHERE order_id=?",o.amount_cents,this.now(),orderId);
+    });
+  }
+  async reviewRefund(actorId,orderId,input) {
+    return this.s.transaction(async()=>{
+      const r=await this.s.get('SELECT r.*,o.venue_id FROM refund_reviews r JOIN orders o ON o.id=r.order_id WHERE r.order_id=?',orderId);requireThat(r,404,'Refund review not found.');await this.staff(actorId,r.venue_id,true);
+      const note=text(input.note,'review note',1000);requireThat(input.refundedCents===r.refunded_cents,409,'The refunded amount changed. Refresh the review before saving.');
+      if(r.status==='reviewed'&&r.note===note)return {duplicate:true};
+      requireThat(r.status==='open',409,'This refund review has already been completed.');
+      await this.s.run("UPDATE refund_reviews SET status='reviewed',note=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE order_id=?",note,actorId,this.now(),this.now(),orderId);
+      await this.audit(r.venue_id,actorId,'payment.refund_reviewed',orderId,{refundedCents:r.refunded_cents,note});return {reviewed:true};
+    });
+  }
   async cancelOrder(userId,oid) {
     (await this.cleanup());return (await this.s.transaction(async ()=>{
       const o=(await this.order(userId,oid));
@@ -198,7 +242,7 @@ export class Regulars {
     (await this.cleanup());const u=(await this.user(userId));
     const members=(await Promise.all((await this.s.all('SELECT id FROM memberships WHERE user_id=?',userId)).map(async m=>(await this.membershipSnapshot(m.id)))));
     return {user:{id:u.id,name:u.name,phone:u.phone,marketingOptIn:!!u.marketing_opt_in},memberships:members,
-      orders:(await this.s.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100',userId)).map(o=>this.orderView(o)),
+      orders:(await this.s.all("SELECT o.*,CASE WHEN o.state='refunded' THEN o.amount_cents ELSE coalesce(r.refunded_cents,0) END refunded_cents FROM orders o LEFT JOIN refund_reviews r ON r.order_id=o.id WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 100",userId)).map(o=>this.orderView(o)),
       reservations:(await this.s.all('SELECT r.*,e.title,e.team,e.starts_at,e.ends_at,v.name venue_name,v.timezone,s.label resource_label FROM reservations r JOIN orders o ON o.id=r.order_id JOIN events e ON e.id=r.event_id JOIN venues v ON v.id=o.venue_id JOIN resources s ON s.id=r.resource_id WHERE o.user_id=? ORDER BY e.starts_at',userId)),
       queue:(await this.s.all("SELECT q.*,v.name venue_name FROM queue_entries q JOIN venues v ON v.id=q.venue_id WHERE q.user_id=? AND q.state IN('held','waiting','called')",userId)),
       staffVenues:(await this.s.all('SELECT v.id,v.slug,v.name,s.role FROM staff s JOIN venues v ON v.id=s.venue_id WHERE s.user_id=?',userId))};
@@ -213,8 +257,8 @@ export class Regulars {
     const reservations=(await this.s.all("SELECT r.*,u.name,u.phone,e.title,v.timezone,s.label resource_label,o.user_id FROM reservations r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id JOIN events e ON e.id=r.event_id JOIN resources s ON s.id=r.resource_id JOIN venues v ON v.id=o.venue_id WHERE o.venue_id=? AND r.state IN('confirmed','attended','no_show') AND r.ends_at>? ORDER BY r.starts_at",v.id,this.now()));
     const members=(await Promise.all((await this.s.all('SELECT id FROM memberships WHERE venue_id=? ORDER BY ends_at DESC',v.id)).map(async m=>(await this.membershipSnapshot(m.id)))));
     const queue=(await this.s.all("SELECT q.*,u.name,u.phone FROM queue_entries q JOIN users u ON u.id=q.user_id LEFT JOIN orders o ON o.id=q.order_id WHERE q.venue_id=? AND q.state IN('waiting','called','held') ORDER BY CASE q.lane WHEN 'priority' THEN 0 ELSE 1 END,CASE q.lane WHEN 'priority' THEN coalesce(o.created_at,q.created_at) ELSE q.created_at END",v.id));
-    const report=role.role==='manager'?{paidCents:(await this.s.get("SELECT coalesce(sum(amount_cents),0) n FROM orders WHERE venue_id=? AND state='paid'",v.id)).n,activeMembers:members.filter(m=>m.active).length,confirmed:reservations.filter(r=>r.state==='confirmed').length,attended:reservations.filter(r=>r.state==='attended').length,bottleActions:(await this.s.get('SELECT count(*) n FROM bottle_log bl JOIN bottles b ON b.id=bl.bottle_id JOIN memberships m ON m.id=b.membership_id WHERE m.venue_id=?',v.id)).n,pendingJobs:(await this.s.get("SELECT count(*) n FROM outbox WHERE status!='done' AND (subject_id IN(SELECT id FROM memberships WHERE venue_id=?) OR subject_id IN(SELECT id FROM orders WHERE venue_id=?))",v.id,v.id)).n}:null;
-    return {venue:v,role:role.role,members,reservations,queue,report,campaigns:role.role==='manager'?(await this.s.all('SELECT * FROM campaigns WHERE venue_id=? ORDER BY created_at DESC',v.id)):[]};
+    const report=role.role==='manager'?{paidCents:(await this.s.get("SELECT CAST(coalesce(sum(o.amount_cents-coalesce(r.refunded_cents,0)),0) AS BIGINT) n FROM orders o LEFT JOIN refund_reviews r ON r.order_id=o.id WHERE o.venue_id=? AND o.state='paid'",v.id)).n,activeMembers:members.filter(m=>m.active).length,confirmed:reservations.filter(r=>r.state==='confirmed').length,attended:reservations.filter(r=>r.state==='attended').length,bottleActions:(await this.s.get('SELECT count(*) n FROM bottle_log bl JOIN bottles b ON b.id=bl.bottle_id JOIN memberships m ON m.id=b.membership_id WHERE m.venue_id=?',v.id)).n,pendingJobs:(await this.s.get("SELECT count(*) n FROM outbox WHERE status!='done' AND (subject_id IN(SELECT id FROM memberships WHERE venue_id=?) OR subject_id IN(SELECT id FROM orders WHERE venue_id=?))",v.id,v.id)).n}:null;
+    return {venue:v,role:role.role,members,reservations,queue,report,refundReviews:role.role==='manager'?await this.s.all("SELECT r.*,o.amount_cents,o.kind,o.state order_state,u.name customer_name FROM refund_reviews r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id WHERE o.venue_id=? ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.updated_at DESC LIMIT 100",v.id):[],campaigns:role.role==='manager'?(await this.s.all('SELECT * FROM campaigns WHERE venue_id=? ORDER BY created_at DESC',v.id)):[]};
   }
   async checkIn(actorId,rid,action) {
     return (await this.s.transaction(async ()=>{

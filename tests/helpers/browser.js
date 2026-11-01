@@ -21,7 +21,7 @@ export async function browser({path='/',search='',config={mode:'demo',wallets:{a
   }
   const elements=Object.fromEntries(['#app','#modal','#modal-content','#toast','#profile-status','#lookup-result','#demo-banner','#staff-panel','#venue-search','#venue-count','#venue-results','.auth-card','#code','#answer','#dialog-error','#booking-price','#season-games'].map(id=>[id,new Element()]));
   const listeners={},intervals=[],timeouts=[],requests=[],clipboard=[],downloads=[],blobs=[];const forms=[];
-  const tabs=['arrivals','lockers','queue','promotions','sync'].map(id=>{const b=new Element();b.dataset.id=id;return b;});
+  const tabs=['arrivals','lockers','queue','refunds','promotions','sync'].map(id=>{const b=new Element();b.dataset.id=id;return b;});
   const document={hidden:false,activeElement:{tagName:'BODY'},querySelector(selector){if(selector==='form[data-dirty]')return forms.find(f=>f.dataset.dirty)||null;return elements[selector]??null;},querySelectorAll:()=>tabs,addEventListener(type,fn){listeners[type]=fn;},createElement:()=>new Element()};
   const location={pathname:path,search,origin:'https://regulars.example',href:`https://regulars.example${path}${search}`,replace(value){this.href=value;}};
   class BrowserURL extends URL {static createObjectURL(blob){blobs.push(blob);return 'blob:fixture';}static revokeObjectURL(url){assertBlob(url);}}

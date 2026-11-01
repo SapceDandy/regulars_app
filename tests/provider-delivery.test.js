@@ -41,7 +41,7 @@ test('partial refunds preserve entitlements; full current membership refunds rel
   const f=await fxt(t),member=await f.member();const order=await f.app.order(f.uid,member.order_id),p=new Payments(f.s,f.app,config);
   const refund={payment_intent:`pi_${order.id}`,amount:order.amount_cents,currency:'usd',amount_refunded:1};
   assert.deepEqual(await p.webhook(...signed(f,'charge.refunded',refund)),{reconcile:true});assert.equal((await f.app.membershipSnapshot(member.id)).active,true);
-  await p.webhook(...signed(f,'charge.refunded',{...refund,currency:'usd',amount_refunded:order.amount_cents}));const current=await f.app.membershipSnapshot(member.id);assert.equal(current.active,false);assert.equal(current.locker,null);
+  await p.webhook(...signed(f,'charge.refunded',{...refund,currency:'usd',amount_refunded:order.amount_cents},'evt_full_refund'));const current=await f.app.membershipSnapshot(member.id);assert.equal(current.active,false);assert.equal(current.locker,null);
   await p.webhook(...signed(f,'charge.refunded',{...refund,payment_intent:'unknown',currency:'usd',amount_refunded:order.amount_cents},'unknown-refund'));
 });
 

@@ -114,6 +114,7 @@ export async function createApplication({config=configuration(),store,now=()=>Da
         if(method==='POST'&&path==='/api/wallet/apple/v1/log') {await readBody(req);return send(200);}
       }
       if(method==='GET'&&(match=path.match(/^\/api\/staff\/([a-z0-9-]+)$/)))return send(200,(await app.staffDashboard((await signedIn()),match[1])));
+      if(method==='POST'&&(match=path.match(/^\/api\/staff\/refund-reviews\/([\w-]+)$/)))return send(200,await app.reviewRefund(await signedIn(),match[1],jsonBody(await readBody(req))));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/([a-z0-9-]+)\/lookup$/))) {const uid=(await signedIn());const b=jsonBody(await readBody(req));return send(200,(await app.memberForStaff(uid,match[1],text(b.token,'pass code',100))));}
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/reservations\/([\w-]+)$/)))return send(200,(await app.checkIn((await signedIn()),match[1],jsonBody(await readBody(req)).action)));
       if(method==='POST'&&(match=path.match(/^\/api\/staff\/queue\/([\w-]+)$/)))return send(200,(await app.queueAction((await signedIn()),match[1],jsonBody(await readBody(req)).action)));
