@@ -1,14 +1,28 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 import { Pool, neonConfig, types } from '@neondatabase/serverless';
+import pg from 'pg';
 import ws from 'ws';
 
 neonConfig.webSocketConstructor = ws;
-types.setTypeParser(20, value => {
+const parseInteger = value => {
   const n = Number(value);
   if (!Number.isSafeInteger(n)) throw new Error('Database integer exceeds safe range');
   return n;
-});
+};
+types.setTypeParser(20, parseInteger);
+pg.types.setTypeParser(20, parseInteger);
+
+// Keep the Supabase secret separate from DATABASE_URL injected by a Neon integration.
+export function databaseConfiguration(env, {pilot=false}={}) {
+  const provider=env.DATABASE_PROVIDER || 'neon';
+  if(!['neon','supabase'].includes(provider))throw new Error('Unsupported database provider');
+  const connectionString=provider==='supabase'?env.SUPABASE_DATABASE_URL:env.DATABASE_URL;
+  if(provider==='supabase'&&!connectionString)throw new Error('Configure SUPABASE_DATABASE_URL');
+  const schema=pilot?'regulars_pilot':env.REGULARS_DB_SCHEMA || (provider==='supabase'?'regulars':'public');
+  if(provider==='supabase'&&schema==='public')throw new Error('Supabase requires a private Regulars schema');
+  return {connectionString,provider,schema,ca:env.DATABASE_CA_CERT};
+}
 
 // Convert positional placeholders without rewriting question marks in SQL literals.
 export function postgresSql(sql) {
@@ -25,7 +39,7 @@ export function postgresSql(sql) {
 }
 
 export function createPostgresStore(pool, {schema='public'}={}) {
-  if(!['public','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
+  if(!['public','regulars','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
   const context = new AsyncLocalStorage();
   const query = async (sql, values = []) => {
     if(context.getStore())return context.getStore().query(postgresSql(sql),values);
@@ -33,7 +47,7 @@ export function createPostgresStore(pool, {schema='public'}={}) {
     const client=await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('SET LOCAL search_path TO regulars_pilot');
+      await client.query(`SET LOCAL search_path TO ${schema}`);
       const result=await client.query(postgresSql(sql),values);
       await client.query('COMMIT');return result;
     } catch(error) {await client.query('ROLLBACK').catch(()=>{});throw error;}finally {client.release();}
@@ -48,7 +62,7 @@ export function createPostgresStore(pool, {schema='public'}={}) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        if(schema==='regulars_pilot')await client.query('SET LOCAL search_path TO regulars_pilot');
+        if(schema!=='public')await client.query(`SET LOCAL search_path TO ${schema}`);
         await client.query("SET LOCAL lock_timeout = '15s'");
         await client.query("SET LOCAL statement_timeout = '20s'");
         // Preserve SQLite's single-writer allocation semantics across all Vercel instances.
@@ -64,8 +78,15 @@ export function createPostgresStore(pool, {schema='public'}={}) {
     },
     async migrate() {
       await store.transaction(async () => {
-        if(schema==='regulars_pilot')await context.getStore().query('CREATE SCHEMA IF NOT EXISTS regulars_pilot');
+        if(schema!=='public'&&!(await context.getStore().query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rows[0])await context.getStore().query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
         await context.getStore().query(readFileSync(new URL('./schema.postgres.sql', import.meta.url), 'utf8'));
+        if(schema==='regulars')await context.getStore().query(`DO $regulars$
+          DECLARE relation record;
+          BEGIN
+            FOR relation IN SELECT tablename FROM pg_tables WHERE schemaname='regulars' LOOP
+              EXECUTE format('ALTER TABLE regulars.%I ENABLE ROW LEVEL SECURITY', relation.tablename);
+            END LOOP;
+          END $regulars$`);
       });
     },
     close: () => pool.end()
@@ -73,10 +94,22 @@ export function createPostgresStore(pool, {schema='public'}={}) {
   return store;
 }
 
-export function openPostgresStore(connectionString, {schema='public'}={}) {
+export function openPostgresStore(connectionString, {schema='public',provider='neon',ca}={}) {
   if (!connectionString) throw new Error('Configure DATABASE_URL before opening PostgreSQL');
-  if(!['public','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
-  const pool = new Pool({connectionString, max: 4, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 10_000});
+  if(!['public','regulars','regulars_pilot'].includes(schema))throw new Error('Unsupported database schema');
+  if(!['neon','supabase'].includes(provider))throw new Error('Unsupported database provider');
+  if(provider==='supabase'&&schema==='public')throw new Error('Supabase requires a private Regulars schema');
+  let options={connectionString, max:4, connectionTimeoutMillis:10_000, idleTimeoutMillis:10_000};
+  if(provider==='supabase') {
+    const url=new URL(connectionString);
+    if(!['postgres:','postgresql:'].includes(url.protocol))throw new Error('Invalid PostgreSQL connection protocol');
+    // URL SSL options override pg's ssl object. Never allow them to weaken verification
+    // or cause pg to read certificate/key paths supplied in a connection URL.
+    for(const key of ['ssl','sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
+    options={...options,connectionString:url.toString(),max:1,ssl:{rejectUnauthorized:true,...(ca?{ca}:{})}};
+  }
+  const Driver=provider==='supabase'?pg.Pool:Pool;
+  const pool = new Driver(options);
   pool.on('error', () => console.error('PostgreSQL connection failed'));
   return createPostgresStore(pool,{schema});
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npm run check",
+  "buildCommand": "npm run check && npm run verify:database",
   "functions": {
     "api/index.js": {
       "maxDuration": 300,

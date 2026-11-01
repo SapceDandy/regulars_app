@@ -16,7 +16,10 @@ class Pool extends EventEmitter{
   async connect(){return{query:this.query.bind(this),release:()=>{this.released=true;}};}
   async end(){this.closed=true;}
 }
-test.before(async()=>{test.mock.module('@neondatabase/serverless',{namedExports:{Pool,neonConfig:{},types:{setTypeParser(){}}}});});
+test.before(async()=>{
+  test.mock.module('@neondatabase/serverless',{namedExports:{Pool,neonConfig:{},types:{setTypeParser(){}}}});
+  test.mock.module('pg',{defaultExport:{Pool,types:{setTypeParser(){}}}});
+});
 function workspace(t){const dir=mkdtempSync(join(tmpdir(),'regulars-startup-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir;}
 
 test('application startup opens SQLite itself, refuses missing hosted databases and cleans failed migrations',async t=>{
@@ -24,6 +27,22 @@ test('application startup opens SQLite itself, refuses missing hosted databases 
   await assert.rejects(createApplication({config:configuration({VERCEL:'1'})}),/DATABASE_URL/);
   const postgres=configuration({DATABASE_URL:'postgres://fixture.invalid/test'});migrateFails=true;await assert.rejects(createApplication({config:postgres,seedData:false}),/migration failure/);assert.equal(pools.at(-1).closed,true);migrateFails=false;
   const hosted=await createApplication({config:postgres,seedData:false});assert.equal(hosted.store.dialect,'postgres');assert.equal(pools.at(-1).options.max,4);t.mock.method(console,'error',()=>{});pools.at(-1).emit('error',Error('private database secret'));assert.equal(console.error.mock.calls[0].arguments[0],'PostgreSQL connection failed');await hosted.store.close();
+});
+
+test('Supabase startup uses the private schema and verified TLS, ignoring a Neon URL',async t=>{
+  const {createApplication}=await import('../apps/web/server.js');
+  const {openPostgresStore}=await import('../packages/db/postgres.js');
+  const env={DATABASE_PROVIDER:'supabase',SUPABASE_DATABASE_URL:'postgresql://regulars:fixture@db.example/postgres?sslmode=no-verify&sslrootcert=/private&ssl=false&sslkey=/key&sslcert=/cert',DATABASE_URL:'postgres://wrong.example/neon'};
+  const app=await createApplication({config:configuration(env),seedData:false});
+  const options=pools.at(-1).options;
+  assert.equal(options.max,1);assert.deepEqual(options.ssl,{rejectUnauthorized:true});
+  assert.equal(options.connectionString,'postgresql://regulars:fixture@db.example/postgres');
+  await app.store.close();assert.equal(pools.at(-1).closed,true);
+  const caStore=openPostgresStore(env.SUPABASE_DATABASE_URL,{provider:'supabase',schema:'regulars',ca:'trusted-root'});
+  assert.deepEqual(pools.at(-1).options.ssl,{rejectUnauthorized:true,ca:'trusted-root'});await caStore.close();
+  const count=pools.length;
+  await assert.rejects(createApplication({config:configuration({...env,SUPABASE_DATABASE_URL:''}),seedData:false}),/SUPABASE_DATABASE_URL/);
+  assert.equal(pools.length,count);
 });
 
 test('request handling ends a disconnected response and rejects writes without JSON headers',async t=>{

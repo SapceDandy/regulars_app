@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { configuration,clientAddress } from './config.js';
 import { openStore } from '../../packages/db/store.js';
-import { openPostgresStore } from '../../packages/db/postgres.js';
+import { openPostgresStore, databaseConfiguration } from '../../packages/db/postgres.js';
 import { seed } from '../../packages/db/seed.js';
 import { Regulars } from '../../packages/core/regulars.js';
 import { Auth } from '../../packages/integrations/auth.js';
@@ -28,8 +28,9 @@ function jsonBody(raw) {try {const parsed=JSON.parse(raw.toString('utf8')||'{}')
 
 export async function createApplication({config=configuration(),store,now=()=>Date.now(),seedData=true,request}={}) {
   if(!store) {
-    requireThat(!config.env.VERCEL||!!config.env.DATABASE_URL,500,'Vercel requires DATABASE_URL.');
-    store=config.env.DATABASE_URL?openPostgresStore(config.env.DATABASE_URL):openStore(config.databasePath);
+    const database=databaseConfiguration(config.env);
+    requireThat(!config.env.VERCEL||!!database.connectionString,500,'Vercel requires DATABASE_URL or SUPABASE_DATABASE_URL.');
+    store=database.connectionString?openPostgresStore(database.connectionString,database):openStore(config.databasePath);
     try { if(store.dialect==='postgres')await store.migrate(); } catch(error) {await store.close();throw error;}
   }
   requireThat(config.mode!=='live'||(await store.get('SELECT count(*) n FROM venues WHERE demo=1')).n===0,500,'Use a fresh live database; demo venues cannot accept live payments.');

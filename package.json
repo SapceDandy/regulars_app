@@ -18,6 +18,7 @@
     "start": "node --env-file-if-exists=.env apps/web/server.js",
     "test": "node --experimental-vm-modules --experimental-test-module-mocks --test tests/*.test.js",
     "check": "node scripts/check.js",
+    "verify:database": "node --env-file-if-exists=.env scripts/verify-database.js",
     "seed": "node --env-file-if-exists=.env scripts/seed.js",
     "backup": "node --env-file-if-exists=.env scripts/backup.js",
     "test:postgres": "REGULARS_TEST_DB=postgres node --experimental-vm-modules --experimental-test-module-mocks --test-concurrency=2 --test tests/*.test.js",
@@ -26,6 +27,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "1.0.2",
+    "pg": "8.23.1",
     "ws": "8.22.0"
   },
   "devDependencies": {

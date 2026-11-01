@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,rmSync,readdirSync} from 'node:fs';
+import {mkdtempSync,rmSync,readdirSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openStore} from '../packages/db/store.js';
@@ -9,6 +9,12 @@ import {demoConfig} from '../packages/db/seed.js';
 const script=new URL('../scripts/seed.js',import.meta.url).pathname;
 function workspace(t){const dir=mkdtempSync(join(tmpdir(),'regulars-seed-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir;}
 function run(dir,env={}){return spawnSync(process.execPath,[script],{cwd:dir,env:{PATH:process.env.PATH,...(process.env.NODE_V8_COVERAGE?{NODE_V8_COVERAGE:process.env.NODE_V8_COVERAGE}:{}),...env},encoding:'utf8',timeout:15000});}
+test('local seed refuses hosted configuration before creating SQLite data',t=>{
+  const dir=workspace(t);
+  for(const env of [{DATABASE_URL:'postgres://fixture.invalid'},{SUPABASE_DATABASE_URL:'postgres://fixture.invalid'},{DATABASE_PROVIDER:'supabase'}]){
+    const result=run(dir,env);assert.notEqual(result.status,0);assert.match(result.stderr,/only seeds SQLite/);assert.equal(existsSync(join(dir,'data')),false);
+  }
+});
 test('seed and backup commands work with default local paths and preserve existing inventory',async t=>{
   const dir=workspace(t);for(let i=0;i<2;i++){const result=run(dir);assert.equal(result.status,0,result.stderr);}
   const s=openStore(join(dir,'data/regulars.sqlite'));assert.equal((await s.get('SELECT count(*) n FROM venues')).n,2);await s.close();

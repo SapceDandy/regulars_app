@@ -18,8 +18,10 @@ test('backup refuses a missing source instead of creating an empty successful ba
   assert.notEqual(result.status,0);assert.equal(existsSync(source),false);assert.equal(existsSync(join(dir,'backups')),false);
 });
 test('SQLite backup refuses PostgreSQL configuration without creating a misleading local backup',t=>{
-  const dir=workspace(t),source=join(dir,'wrong.sqlite');const result=run(dir,source,{DATABASE_URL:'postgres://fixture.invalid/regulars'});
-  assert.notEqual(result.status,0);assert.match(result.stderr,/PostgreSQL/);assert.equal(existsSync(source),false);
+  const dir=workspace(t),source=join(dir,'wrong.sqlite');
+  for(const env of [{DATABASE_URL:'postgres://fixture.invalid/regulars'},{SUPABASE_DATABASE_URL:'postgres://fixture.invalid/regulars'},{DATABASE_PROVIDER:'supabase'}]){
+    const result=run(dir,source,env);assert.notEqual(result.status,0);assert.match(result.stderr,/PostgreSQL/);assert.equal(existsSync(source),false);
+  }
 });
 test('online SQLite backup restores memberships, stock, bookings, audit and pending jobs',async t=>{
   const dir=workspace(t),source=join(dir,'live.sqlite');const f=await fixture(source);

@@ -1,6 +1,6 @@
 # Architecture
 
-The application uses Node.js 24 and a same-origin web client. Local development uses durable SQLite in WAL mode; Vercel uses Neon PostgreSQL. Both expose the same asynchronous store contract. Each hosted invocation owns and closes its pool. Initial schema creation runs under the database advisory lock once per warm function instance; it is idempotent, not a general migration framework.
+The application uses Node.js 24 and a same-origin web client. Local development uses durable SQLite in WAL mode; Vercel uses PostgreSQL: the provider-testing branch selects Supabase, while the existing synthetic preview stays on Neon. Supabase uses a restricted server database role, a private `regulars` schema and verified TLS through its transaction pooler. App sessions remain Twilio-based; Supabase Auth and public Data API access are not used. Both expose the same asynchronous store contract. Each hosted invocation owns and closes its pool. Initial schema creation runs under the database advisory lock once per warm function instance; it is idempotent, not a general migration framework.
 
 ## Boundaries
 

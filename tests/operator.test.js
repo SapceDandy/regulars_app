@@ -42,4 +42,7 @@ test('operator PostgreSQL command uses the explicitly selected schema and closes
   const {runOperator}=await import('../scripts/operator.js');await assert.rejects(runOperator({},['report']),{status:400});
   const report=await runOperator({DATABASE_URL:'postgres://fixture.invalid/test'},['report'],openHosted);assert.equal(report.staff.length,1);assert.equal(calls[0].schema,'public');
   await assert.rejects(runOperator({DATABASE_URL:'postgres://fixture.invalid/test',REGULARS_DB_SCHEMA:'regulars_pilot'},['bad'],openHosted),{status:400});assert.equal(calls[1].schema,'regulars_pilot');assert.equal(closed,2);
+  await runOperator({DATABASE_PROVIDER:'supabase',SUPABASE_DATABASE_URL:'postgres://supabase.invalid/postgres',DATABASE_URL:'wrong-neon'},['report'],openHosted);
+  assert.equal(calls[2].url,'postgres://supabase.invalid/postgres');assert.equal(calls[2].schema,'regulars');assert.equal(calls[2].provider,'supabase');assert.equal(closed,3);
+  await assert.rejects(runOperator({DATABASE_PROVIDER:'supabase',DATABASE_PATH:'ignored'},['report'],openHosted),/SUPABASE_DATABASE_URL/);assert.equal(closed,3);
 });

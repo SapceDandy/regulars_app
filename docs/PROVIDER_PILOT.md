@@ -1,6 +1,6 @@
 # Regulars provider pilot environment
 
-The `codex/provider-pilot` branch prepares a separate Vercel Preview for real provider sandbox tests. It starts from the tested application revision `1ab92266ac09e72dec2924c61ed0cc648168fc1e`. The initial branch change is documentation only.
+The `codex/provider-pilot` branch prepares a separate Vercel Preview for real provider sandbox tests. It starts from the tested application revision `1ab92266ac09e72dec2924c61ed0cc648168fc1e`. It now adds Supabase transport and private-schema verification.
 
 ## Isolation and current state
 
@@ -8,7 +8,8 @@ The `codex/provider-pilot` branch prepares a separate Vercel Preview for real pr
 - Provider-pilot configuration is scoped to this branch. It uses the separate Regulars Stripe sandbox and Square sandbox application, never KUDJO live credentials.
 - `PILOT_TESTING_ENABLED=false` selects real authentication and signed-provider handling. Missing prerequisites must return an unavailable response; do not use placeholder credentials or synthetic authentication to start it.
 - Session and cron secrets are distinct from other environments. Store all credentials as server-only Vercel secrets.
-- Neon automatic preview branching is enabled in the storage connection. Confirm the actual provider branch and its contents before initializing data or running recovery tests. Project-level environment labels do not identify the deployment-time Neon branch.
+- The owner selected Supabase. A new free Regulars Pilot project lives in the existing Kudjo organization, with its own database and restricted Regulars role. `DATABASE_PROVIDER=supabase` and `SUPABASE_DATABASE_URL` are branch-only settings; the Neon-injected `DATABASE_URL` is ignored. No KUDJO application data or database credentials are reused.
+- Tables live in the private `regulars` schema with RLS enabled. Neither `anon` nor `authenticated` has schema access. The server owns these tables and continues to enforce venue authorization.
 - Retain Vercel Authentication. Approve an exact webhook access mechanism before registering external callbacks; do not expose account or staff routes.
 
 ## Remaining configuration
@@ -23,3 +24,4 @@ The `codex/provider-pilot` branch prepares a separate Vercel Preview for real pr
 | Venue | Supply explicitly reviewed test inventory, terms, prices and controlled staff identities through private `VENUE_CONFIG_JSON`. Do not mark illustrative venue data approved as a substitute for review. |
 
 Follow docs/VERCEL.md, docs/SETUP.md and OPERATIONS.md. A successful build or populated environment variable is not evidence of a working provider integration. Close each gate with actual signed callback, controlled-phone or physical-device results as applicable.
+

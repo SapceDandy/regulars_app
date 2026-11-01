@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { configuration } from './config.js';
 import { createApplication } from './server.js';
-import { openPostgresStore } from '../../packages/db/postgres.js';
+import { openPostgresStore, databaseConfiguration } from '../../packages/db/postgres.js';
 import { pilotConfiguration, blockPilotProvider } from './pilot.js';
 
 export function authorizedCron(header, secret) {
@@ -22,12 +22,13 @@ export function vercelHandler({env = process.env, openStore = openPostgresStore,
     }
     let store;
     try {
-      if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
       const pilot = env.PILOT_TESTING_ENABLED === 'true';
+      const database=databaseConfiguration(env,{pilot});
+      if (!database.connectionString) throw new Error('DATABASE_URL is required');
       if (!pilot && env.VERCEL_ENV === 'preview' && !env.STRIPE_SECRET_KEY?.startsWith('sk_test_')) throw new Error('Preview requires Stripe test credentials');
       const origin = env.PUBLIC_ORIGIN || (env.VERCEL_ENV === 'preview' && env.VERCEL_URL ? `https://${env.VERCEL_URL}` : undefined);
       const config = pilot ? pilotConfiguration(env) : configuration({...env, PUBLIC_ORIGIN: origin, NODE_ENV: 'production', APP_MODE: 'live'});
-      store = openStore(env.DATABASE_URL, {schema:pilot?'regulars_pilot':'public'});
+      store = openStore(database.connectionString, database);
       if (!migrated) {await store.migrate();migrated = true;}
       const runtime = await createApp({config, store,...(pilot?{request:blockPilotProvider}:{})});
       if (cron) {

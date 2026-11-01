@@ -86,3 +86,14 @@ test('Vercel client IP is trusted only when running on Vercel', () => {
   assert.equal(clientAddress(req,{env:{VERCEL:'1'}}),'203.0.113.3');
   assert.equal(clientAddress(req,{env:{}}),'127.0.0.1');
 });
+
+test('Vercel provider preview selects Supabase and fails closed if its secret is missing',async()=>{
+  let opened=0,selected;
+  const providerEnv={...env,DATABASE_PROVIDER:'supabase',SUPABASE_DATABASE_URL:'postgres://regulars.example/postgres',VERCEL_ENV:'preview'};
+  const openStore=(url,options)=>{opened++;selected={url,...options};return{migrate:async()=>{},close:async()=>{}};};
+  const createApp=async()=>({handler:async(_req,res)=>{res.writeHead(200);res.end('ok');}});
+  const first=response();await vercelHandler({env:providerEnv,openStore,createApp})({url:'/',headers:{}},first);
+  assert.equal(first.status,200);assert.equal(selected.url,providerEnv.SUPABASE_DATABASE_URL);assert.equal(selected.schema,'regulars');assert.equal(selected.provider,'supabase');
+  const second=response();await vercelHandler({env:{...providerEnv,SUPABASE_DATABASE_URL:''},openStore,createApp})({url:'/',headers:{}},second);
+  assert.equal(second.status,503);assert.equal(opened,1);
+});
