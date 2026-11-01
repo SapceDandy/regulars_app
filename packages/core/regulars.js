@@ -251,7 +251,10 @@ export class Regulars {
     return (await this.s.transaction(async ()=>{
       const prior=(await this.s.get('SELECT * FROM bottle_log WHERE idempotency_key=?',`${b.venue_id}:${key}`));if(prior) {requireThat(prior.bottle_id===bid&&prior.delta_ml===amount,409,'Retry key belongs to another action.');return {duplicate:true};}
       const current=(await this.s.get('SELECT remaining_ml FROM bottles WHERE id=?',bid)).remaining_ml;
-      if(amount<0) requireThat(b.status==='active'&&b.ends_at>this.now(),409,'Membership is not active. Contact a manager.');
+      if(amount<0) {
+        requireThat(b.status==='active'&&b.ends_at>this.now(),409,'Membership is not active. Contact a manager.');
+        requireThat(await this.s.get("SELECT id FROM locker_allocations WHERE membership_id=? AND state='active' AND starts_at<=? AND ends_at>?",b.membership_id,this.now(),this.now()),409,'An active locker is required for bottle service.');
+      }
       requireThat(current+amount>=0&&current+amount<=b.capacity_ml,409,'This change would exceed the recorded bottle balance.');
       if(amount>0) (await this.staff(actorId,b.venue_id,true));
       (await this.s.run('UPDATE bottles SET remaining_ml=remaining_ml+? WHERE id=?',amount,bid));
