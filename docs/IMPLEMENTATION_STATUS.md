@@ -1,5 +1,11 @@
 # Implementation and verification status
 
+## November 1 — payment rehearsal and accessibility audit
+
+Actual Regulars Stripe sandbox checkout and CLI-forwarded signed webhooks passed against an isolated local test fixture: activation, decline, 3D Secure retry, duplicate/tampered events, partial/full refunds, manager review, cancellation and hold release. All sandbox payments were refunded and unused sessions expired. A reusable opt-in procedure is in [tests/manual/README.md](../tests/manual/README.md). Hosted return URLs and Vercel webhook delivery remain separate gates.
+
+The hosted dialog audit found missing accessible names. Shared dialogs now associate their visible heading with the native dialog. Keyboard Tab and Escape behavior were exercised; this is not physical-device or screen-reader acceptance. Syntax checks, all 155 tests and 100% measured runtime line/branch/function coverage pass. The dependency audit reported zero known vulnerabilities. Overall planning progress remains 13 of 20 workstreams (65%); provider, device, hosted-operations and venue-acceptance gates remain open. No production promotion is included.
+
 Prepared October 15, 2026; repository references updated October 16, 2026. The application destination is [SapceDandy/regulars_app](https://github.com/SapceDandy/regulars_app); the separate concept destination is [SapceDandy/regulars_brain](https://github.com/SapceDandy/regulars_brain). Both user-created repositories were discovered through the connected GitHub account. This application source is intended for regulars_app, with the existing public visibility preserved. Remote publication does not establish live deployment or provider readiness.
 
 ## Vercel preparation — October 30, 2026

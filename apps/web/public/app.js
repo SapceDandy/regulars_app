@@ -16,7 +16,8 @@ async function api(path,{method='GET',body,key}={}) {
   }finally{if(writing)pendingWrites--;}
 }
 function toast(message,error=false){clearTimeout(toastTimer);toastBox.textContent=message;toastBox.classList.toggle('error',error);toastBox.hidden=false;toastTimer=setTimeout(()=>{toastBox.hidden=true;},6000);}
-function openModal(content){modalContent.innerHTML='<p id="dialog-error" class="notice warning" role="alert" hidden></p>'+content;if(!modal.open)modal.showModal();}
+// Every dialog's first h2 supplies its visible and accessible title.
+function openModal(content){modalContent.innerHTML='<p id="dialog-error" class="notice warning" role="alert" hidden></p>'+content.replace('<h2>','<h2 id="dialog-title">');if(!modal.open)modal.showModal();}
 function reportError(message){const target=modal.open?document.querySelector('#dialog-error'):null;if(target){target.textContent=message;target.hidden=false;}else toast(message,true);}
 function closeModal(){modal.close();}
 function loginLink(){return `/login?next=${encodeURIComponent(location.pathname+location.search)}`;}
