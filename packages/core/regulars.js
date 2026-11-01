@@ -141,8 +141,8 @@ export class Regulars {
     return (await this.s.transaction(async ()=>{
       if((await this.s.get('SELECT id FROM payment_events WHERE id=?',eventId))) return {duplicate:true};
       const o=(await this.s.get('SELECT * FROM orders WHERE id=?',orderId));requireThat(o,404,'Order not found.');
-      requireThat(o.amount_cents===amount && o.currency===currency && (!o.stripe_session||o.stripe_session===sessionId),409,'Payment does not match the held order.');
-      if(o.state==='paid') {(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {duplicate:true};}
+      requireThat(o.amount_cents===amount && o.currency===currency && (!o.stripe_session||o.stripe_session===sessionId) && typeof paymentIntent==='string' && paymentIntent.length>0 && (!o.payment_intent||o.payment_intent===paymentIntent),409,'Payment does not match the held order.');
+      if(['paid','refund_pending','refunded'].includes(o.state)) {(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {duplicate:true};}
       if(o.state!=='held'||o.expires_at<=this.now()) {
         (await this.release(o.id,'refund_pending'));(await this.s.run('UPDATE orders SET payment_intent=? WHERE id=?',paymentIntent,o.id));(await this.enqueue('refund',o.id));(await this.s.run('INSERT INTO payment_events VALUES(?,?)',eventId,this.now()));return {refundPending:true};
       }

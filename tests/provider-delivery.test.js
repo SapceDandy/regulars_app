@@ -29,7 +29,7 @@ test('provider HTTP errors redact response bodies and preserve caller cancellati
 test('external full refunds refresh affected passes and replay without duplicate audit or revisions',async t=>{
   const f=await fxt(t),member=await f.member(),order=await f.ticket();await f.paid(order);
   const p=new Payments(f.s,f.app,config),before=await f.app.membershipSnapshot(member.id);
-  const args=signed(f,'charge.refunded',{payment_intent:`pi_${order.id}`,amount:order.amount_cents,amount_refunded:order.amount_cents});
+  const args=signed(f,'charge.refunded',{payment_intent:`pi_${order.id}`,amount:order.amount_cents,currency:'usd',amount_refunded:order.amount_cents});
   await p.webhook(...args);const after=await f.app.membershipSnapshot(member.id);
   assert.equal((await f.app.order(f.uid,order.id)).state,'refunded');assert.equal((await f.s.get('SELECT state FROM reservations WHERE order_id=?',order.id)).state,'cancelled');
   assert.ok(after.revision>before.revision,'removing the next game must queue a pass refresh');
@@ -39,21 +39,21 @@ test('external full refunds refresh affected passes and replay without duplicate
 
 test('partial refunds preserve entitlements; full current membership refunds release lockers',async t=>{
   const f=await fxt(t),member=await f.member();const order=await f.app.order(f.uid,member.order_id),p=new Payments(f.s,f.app,config);
-  const refund={payment_intent:`pi_${order.id}`,amount:order.amount_cents,amount_refunded:1};
+  const refund={payment_intent:`pi_${order.id}`,amount:order.amount_cents,currency:'usd',amount_refunded:1};
   assert.deepEqual(await p.webhook(...signed(f,'charge.refunded',refund)),{reconcile:true});assert.equal((await f.app.membershipSnapshot(member.id)).active,true);
-  await p.webhook(...signed(f,'charge.refunded',{...refund,amount_refunded:order.amount_cents}));const current=await f.app.membershipSnapshot(member.id);assert.equal(current.active,false);assert.equal(current.locker,null);
-  await p.webhook(...signed(f,'charge.refunded',{...refund,payment_intent:'unknown',amount_refunded:order.amount_cents},'unknown-refund'));
+  await p.webhook(...signed(f,'charge.refunded',{...refund,currency:'usd',amount_refunded:order.amount_cents}));const current=await f.app.membershipSnapshot(member.id);assert.equal(current.active,false);assert.equal(current.locker,null);
+  await p.webhook(...signed(f,'charge.refunded',{...refund,payment_intent:'unknown',currency:'usd',amount_refunded:order.amount_cents},'unknown-refund'));
 });
 
 test('refunds preserve attended bookings and renewed memberships while releasing unused priority',async t=>{
   const f=await fxt(t),member=await f.member(),p=new Payments(f.s,f.app,config);
   const order=await f.ticket();await f.paid(order);const reservation=await f.s.get('SELECT * FROM reservations WHERE order_id=?',order.id);f.setTime(reservation.starts_at);await f.app.checkIn(f.manager,reservation.id,'attended');
   f.setTime(member.ends_at-86400000);const renewal=await f.app.createOrder(f.uid,{kind:'membership',venueId:'v_copper',planId:'v_copper_shared'},'renew');await f.paid(renewal);
-  const old=await f.app.order(f.uid,member.order_id);await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${old.id}`,amount:old.amount_cents,amount_refunded:old.amount_cents},'refund-old'));
+  const old=await f.app.order(f.uid,member.order_id);await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${old.id}`,amount:old.amount_cents,currency:'usd',amount_refunded:old.amount_cents},'refund-old'));
   assert.equal((await f.app.membershipSnapshot(member.id)).active,true);
-  await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${order.id}`,amount:order.amount_cents,amount_refunded:order.amount_cents},'refund-attended'));assert.equal((await f.s.get('SELECT state FROM reservations WHERE id=?',reservation.id)).state,'attended');
+  await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${order.id}`,amount:order.amount_cents,currency:'usd',amount_refunded:order.amount_cents},'refund-attended'));assert.equal((await f.s.get('SELECT state FROM reservations WHERE id=?',reservation.id)).state,'attended');
   const q=await f.app.joinQueue(f.uid,'v_copper',2),priority=await f.app.createOrder(f.uid,{kind:'priority',venueId:'v_copper',queueId:q.queueId},'priority');await f.paid(priority);
-  await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${priority.id}`,amount:priority.amount_cents,amount_refunded:priority.amount_cents},'refund-priority'));const released=await f.s.get('SELECT * FROM queue_entries WHERE id=?',q.queueId);assert.equal(released.lane,'standard');assert.equal(released.order_id,null);
+  await p.webhook(...signed(f,'charge.refunded',{payment_intent:`pi_${priority.id}`,amount:priority.amount_cents,currency:'usd',amount_refunded:priority.amount_cents},'refund-priority'));const released=await f.s.get('SELECT * FROM queue_entries WHERE id=?',q.queueId);assert.equal(released.lane,'standard');assert.equal(released.order_id,null);
 });
 
 test('refund provider retries use one idempotency key and only accept settled refunds',async t=>{
@@ -115,5 +115,5 @@ test('priority checkout fallback label and a new refund event for a settled refu
   const f=await fxt(t),q=await f.app.joinQueue(f.uid,'v_copper',1),o=await f.app.createOrder(f.uid,{kind:'priority',venueId:'v_copper',queueId:q.queueId},'priority-label');let label;
   const p=new Payments(f.s,f.app,config,{request:async(url,options)=>{label=options.body.get('line_items[0][price_data][product_data][name]');return{json:async()=>({id:'cs_priority',url:'https://checkout.stripe.com/fixture'})};}});await p.checkout(o);assert.equal(label,'Regulars · Priority access');
   await f.app.settle({eventId:'evt_priority',orderId:o.id,amount:o.amount_cents,currency:'usd',paymentIntent:'pi_priority',sessionId:'cs_priority'});
-  const refund={payment_intent:'pi_priority',amount:o.amount_cents,amount_refunded:o.amount_cents};await p.webhook(...signed(f,'charge.refunded',refund,'refund-first'));assert.deepEqual(await p.webhook(...signed(f,'charge.refunded',refund,'refund-second')),{duplicate:true});assert.equal((await f.s.get("SELECT count(*) n FROM audit WHERE action='payment.refunded'")).n,1);
+  const refund={payment_intent:'pi_priority',amount:o.amount_cents,currency:'usd',amount_refunded:o.amount_cents};await p.webhook(...signed(f,'charge.refunded',refund,'refund-first'));assert.deepEqual(await p.webhook(...signed(f,'charge.refunded',refund,'refund-second')),{duplicate:true});assert.equal((await f.s.get("SELECT count(*) n FROM audit WHERE action='payment.refunded'")).n,1);
 });
