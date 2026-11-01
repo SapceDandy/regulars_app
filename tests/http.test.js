@@ -1,18 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApplication } from '../apps/web/server.js';
 import { configuration } from '../apps/web/config.js';
-import { openStore } from '../packages/db/store.js';
+import {serverFixture} from './helpers/http.js';
 
-async function serverFixture(t) {
-  const config=configuration({APP_MODE:'demo',PUBLIC_ORIGIN:'http://127.0.0.1:3000'});const store=openStore();const r=createApplication({config,store});await new Promise(resolve=>r.server.listen(0,'127.0.0.1',resolve));config.origin=`http://127.0.0.1:${r.server.address().port}`;
-  t.after(async()=>{r.server.closeAllConnections();await new Promise(resolve=>r.server.close(resolve));store.close();});
-  const call=async(path,{method='GET',body,cookie,origin=true,key}={})=>{
-    const response=await fetch(config.origin+path,{method,headers:{...(origin?{origin:config.origin}:{}),...(method!=='GET'?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{}),...(key?{'idempotency-key':key}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});const content=response.headers.get('content-type')??'';return {status:response.status,headers:response.headers,data:content.includes('json')?await response.json():await response.text()};
-  };
-  const login=async(phone='+12025550101')=>{const start=await call('/api/auth/start',{method:'POST',body:{phone,smsConsent:true}});assert.equal(start.status,200);const verify=await call('/api/auth/verify',{method:'POST',body:{phone,code:start.data.demoCode,name:'Test Patron'}});assert.equal(verify.status,200);return verify.headers.get('set-cookie').split(';')[0];};
-  return {...r,call,login};
-}
 
 test('discovery pages expose metadata but private APIs require phone sign-in',async t=>{
   const f=await serverFixture(t);const page=await f.call('/v/copper-room');assert.equal(page.status,200);assert.match(page.data,/<title>The Copper Room/);assert.match(page.data,/noindex,nofollow/);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'self'/);assert.equal((await f.call('/api/account')).status,401);assert.equal((await f.call('/api/staff/copper-room')).status,401);
@@ -24,7 +14,7 @@ test('SMS consent, code expiry, attempt limits and one-time consumption are enfo
   const p2='+12025550112';const sent=await f.call('/api/auth/start',{method:'POST',body:{phone:p2,smsConsent:true}});for(let i=0;i<5;i++)assert.equal((await f.call('/api/auth/verify',{method:'POST',body:{phone:p2,code:'000000'}})).status,401);assert.equal((await f.call('/api/auth/verify',{method:'POST',body:{phone:p2,code:sent.data.demoCode}})).status,401);
 });
 test('origin checks prevent cross-site writes even with a valid session cookie',async t=>{
-  const f=await serverFixture(t);const cookie=await f.login();assert.equal((await f.call('/api/memberships/guest',{method:'POST',origin:false,cookie,body:{venueId:'v_copper',planId:'v_copper_guest'}})).status,403);assert.equal(f.store.get('SELECT count(*) n FROM memberships').n,0);
+  const f=await serverFixture(t);const cookie=await f.login();assert.equal((await f.call('/api/memberships/guest',{method:'POST',origin:false,cookie,body:{venueId:'v_copper',planId:'v_copper_guest'}})).status,403);assert.equal((await f.store.get('SELECT count(*) n FROM memberships')).n,0);
 });
 test('full guest journey: sign in, buy, see booking, add guest pass, logout',async t=>{
   const f=await serverFixture(t);const cookie=await f.login();const venue=(await f.call('/api/venues/copper-room')).data;const body={venueId:venue.venue.id,kind:'ticket',resourceId:venue.resources[0].id,eventId:venue.events[0].id,partySize:1};
@@ -54,4 +44,90 @@ test('static asset paths are allowlisted and a venue slug cannot traverse files'
 });
 test('production refuses demo auth and live mode refuses missing providers or HTTP',()=>{
   assert.throws(()=>configuration({NODE_ENV:'production',APP_MODE:'demo'}),/Production cannot/);assert.throws(()=>configuration({APP_MODE:'live'}),/Configure/);assert.throws(()=>configuration({APP_MODE:'demo',HOST:'0.0.0.0'}),/localhost/);
+});
+
+test('pilot personas and viewport tools are unavailable unless the runtime is explicitly a pilot',async t=>{
+  const f=await serverFixture(t);
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',body:{role:'manager'}})).status,404);
+  assert.equal((await f.call('/pilot')).status,404);
+  f.config.pilot=true;
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',body:{role:'owner'}})).status,400);
+  assert.equal((await f.call('/api/pilot/session',{method:'POST',origin:false,body:{role:'manager'}})).status,403);
+  const guest=await f.call('/api/pilot/session',{method:'POST',body:{role:'guest'}});
+  assert.equal(guest.status,200);const guestCookie=guest.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.call('/api/staff/copper-room',{cookie:guestCookie})).status,403);
+  const manager=await f.call('/api/pilot/session',{method:'POST',body:{role:'manager'}});
+  assert.equal(manager.status,200);const managerCookie=manager.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.call('/api/staff/copper-room',{cookie:managerCookie})).status,200);
+  const viewport=await f.call('/pilot?width=390&page=https://evil.example');
+  assert.match(viewport.data,/src="\/" width="390"/);assert.doesNotMatch(viewport.data,/evil.example/);
+});
+
+test('profile edits persist only to the signed-in user and reject blank names',async t=>{
+  const f=await serverFixture(t);const first=await f.login('+12025550131'),second=await f.login('+12025550132');
+  const saved=await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'Pilot Updated',marketingOptIn:true}});
+  assert.equal(saved.status,200);
+  const account=(await f.call('/api/account',{cookie:first})).data;
+  assert.equal(account.user.name,'Pilot Updated');assert.equal(account.user.marketingOptIn,true);
+  assert.equal((await f.call('/api/account',{cookie:second})).data.user.name,'Test Patron');
+  assert.equal((await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'   ',marketingOptIn:false}})).status,400);
+  assert.equal((await f.call('/api/account',{cookie:first})).data.user.marketingOptIn,true);
+  assert.equal((await f.call('/api/account',{method:'PATCH',cookie:first,body:{name:'Pilot Updated',marketingOptIn:false}})).status,200);
+  assert.equal((await f.call('/api/account',{cookie:first})).data.user.marketingOptIn,false);
+});
+
+test('arrival HTTP flow enforces staff scope, opening time, grace deadline and single processing',async t=>{
+  let clock=Date.now();const f=await serverFixture(t,{now:()=>clock});
+  const guest=await f.login('+12025550141'),manager=await f.login('+12025550100'),outsider=await f.login('+12025550142');
+  await f.store.run('INSERT INTO staff VALUES(?,?,?)',(await f.auth.session(outsider)).id,'v_social','manager');
+  const page=(await f.call('/api/venues/copper-room')).data,game=page.events[0];
+  const resources=await f.store.all("SELECT * FROM resources WHERE venue_id='v_copper' ORDER BY label LIMIT 2");
+  const reservations=[];
+  for(const resource of resources){
+    const order=await f.call('/api/orders',{method:'POST',cookie:guest,key:`arrival-${resource.id}`,body:{kind:'ticket',venueId:'v_copper',eventId:game.id,resourceId:resource.id,partySize:1}});
+    assert.equal(order.status,201);assert.equal((await f.call(`/api/orders/${order.data.orderId}/demo-pay`,{method:'POST',cookie:guest,body:{}})).status,200);
+    reservations.push(await f.store.get('SELECT * FROM reservations WHERE order_id=?',order.data.orderId));
+  }
+  const [arrived,late]=reservations;
+  const action=(r,cookie,value)=>f.call(`/api/staff/reservations/${r.id}`,{method:'POST',cookie,body:{action:value}});
+  clock=arrived.starts_at-3600001;
+  assert.equal((await action(arrived,manager,'attended')).status,409);
+  clock++;
+  assert.equal((await action(arrived,guest,'attended')).status,403);
+  assert.equal((await action(arrived,outsider,'attended')).status,403);
+  assert.equal((await action(arrived,manager,'attended')).status,200);
+  assert.equal((await action(arrived,manager,'attended')).status,409);
+  assert.equal((await f.call(`/api/orders/${arrived.order_id}/cancel`,{method:'POST',cookie:guest,body:{}})).status,409);
+  clock=late.checkin_deadline;
+  assert.equal((await action(late,manager,'no_show')).status,409);
+  clock++;
+  assert.equal((await action(late,manager,'no_show')).status,200);
+  assert.equal((await action(late,manager,'attended')).status,409);
+  const dashboard=(await f.call('/api/staff/copper-room',{cookie:manager})).data;
+  assert.equal(dashboard.report.confirmed,0);assert.equal(dashboard.report.attended,1);
+  const account=(await f.call('/api/account',{cookie:guest})).data;
+  assert.deepEqual(account.reservations.map(r=>r.state).sort(),['attended','no_show']);
+  assert.ok(account.orders.every(o=>o.state==='paid'));
+});
+
+test('failed delivery exhausts retries, hides provider secrets and recovers only through a venue manager',async t=>{
+  let clock=Date.now();const f=await serverFixture(t,{now:()=>clock});
+  const guest=await f.login('+12025550143'),manager=await f.login('+12025550100'),staff=await f.login('+12025550144'),outsider=await f.login('+12025550145');
+  await f.store.run('INSERT INTO staff VALUES(?,?,?)',(await f.auth.session(staff)).id,'v_copper','staff');
+  await f.store.run('INSERT INTO staff VALUES(?,?,?)',(await f.auth.session(outsider)).id,'v_social','manager');
+  await f.call('/api/memberships/guest',{method:'POST',cookie:guest,body:{venueId:'v_copper',planId:'v_copper_guest'}});
+  f.wallets.update=async()=>{throw new Error('private-provider-detail');};
+  for(let i=0;i<8;i++){
+    await f.jobs.tick();const job=await f.store.get('SELECT * FROM outbox LIMIT 1');
+    assert.equal(job.attempts,i+1);assert.equal(job.status,i===7?'failed':'pending');clock=job.next_at;
+  }
+  const job=await f.store.get('SELECT * FROM outbox LIMIT 1');
+  const listed=await f.call('/api/staff/copper-room/jobs',{cookie:manager});assert.equal(listed.status,200);assert.doesNotMatch(JSON.stringify(listed.data),/private-provider-detail/);
+  assert.equal((await f.call('/api/staff/copper-room/jobs',{cookie:staff})).status,403);
+  for(const cookie of [guest,staff,outsider])assert.equal((await f.call(`/api/staff/jobs/${job.id}/retry`,{method:'POST',cookie,body:{}})).status,403);
+  assert.equal((await f.call(`/api/staff/jobs/${job.id}/retry`,{method:'POST',cookie:manager,body:{}})).status,200);
+  let delivered=0;f.wallets.update=async()=>{delivered++;};await f.jobs.tick();await f.jobs.tick();
+  assert.equal(delivered,1);assert.equal((await f.store.get('SELECT status FROM outbox WHERE id=?',job.id)).status,'done');
+  assert.deepEqual((await f.call('/api/staff/copper-room/jobs',{cookie:manager})).data,[]);
+  assert.equal((await f.call('/api/account',{cookie:guest})).data.memberships[0].active,true);
 });

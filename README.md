@@ -6,9 +6,10 @@ This is the **application codebase** at [SapceDandy/regulars_app](https://github
 
 ## Run the local demo
 
-Requires **Node.js 24.13+ within the 24.x line**. No third-party runtime packages, database server, build, or package installation are needed. OpenSSL is needed for live Apple pass signing and the signing test.
+Requires **Node.js 24.13+ within the 24.x line**. Run `npm ci` first. The local demo needs no database server or build step. OpenSSL is needed for live Apple pass signing and the signing test.
 
 ```sh
+npm ci
 cp .env.example .env
 npm start
 ```
@@ -23,7 +24,13 @@ Open `http://localhost:3000`. Demo mode binds only to localhost. Sample venues, 
 ```sh
 npm run check
 npm test
+npm run test:coverage
+npm run test:postgres
 ```
+
+`test:coverage` requires 100% native V8 line, branch and function coverage for every application JavaScript file under `api/`, `apps/` and `packages/`, plus the seed, backup and operator commands. It also fails if a runtime file is absent from the report. The generated `coverage-summary.json` is local and ignored by Git. Tests, dependencies and developer validation tools are outside this runtime scope. CI installs locked dependencies, enforces coverage and runs the PostgreSQL suite.
+
+Browser event tests execute the exact shipped ES module with small DOM doubles; they do not replace visual, accessibility or real-device testing. The suite uses Node 24 experimental VM-module and module-mocking flags only during tests. The PostgreSQL suite uses PGlite with two test workers to bound memory; disk backup and local-server process tests still use SQLite. Provider transports are mocked, and signing keys are temporary test fixtures. Real SMS, payment and Wallet delivery remain separate pilot gates.
 
 ## What is implemented
 
@@ -38,9 +45,9 @@ npm test
 | At the door | Standard queue plus optional capped, escalating paid-priority lane |
 | Staff | Current member lookup, bottle receipt/service/corrections, check-in, queue actions |
 | Operator | Operating counts, campaign drafts/approval/copy links, sync/refund failures and retries |
-| Resilience | Persistent SQLite, transactions, checkout holds, signature checks, idempotency, job retries |
+| Resilience | Local SQLite or hosted PostgreSQL, transactions, checkout holds, signature checks, idempotency, job retries |
 
-See [implementation status](docs/IMPLEMENTATION_STATUS.md) for important limits. A generic iframe and staff API do **not** mean Square, Toast, OpenTable, Resy or another vendor is integrated.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md) for important limits. Square has a signature-verified payment inbox with explicit staff bottle matching; its actual sandbox connection still needs verification. A generic iframe does not imply an integration with Toast, OpenTable, Resy or another vendor. See [operator and Square setup](OPERATIONS.md).
 
 ## Why a monorepo
 
@@ -79,3 +86,7 @@ For future updates from a clone, [publish-github.sh](scripts/publish-github.sh) 
 - [Implementation and verification status](docs/IMPLEMENTATION_STATUS.md)
 - [Next iterations](docs/ROADMAP.md)
 - [Official provider references](docs/REFERENCES.md)
+
+## Vercel pilot
+
+See [Vercel setup and pilot gates](docs/VERCEL.md). The hosted adapter uses Neon PostgreSQL, request-scoped connections and authenticated cron delivery. A protected preview is not a completed venue pilot. Run `npm run test:postgres` for the embedded PostgreSQL suite.

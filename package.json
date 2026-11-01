@@ -4,14 +4,31 @@
   "private": true,
   "type": "module",
   "description": "Regulars: membership, lockers and game-day reservations for local venues",
-  "engines": { "node": ">=24.13.0 <25" },
-  "workspaces": ["apps/web", "packages/core", "packages/db", "packages/integrations"],
+  "engines": {
+    "node": ">=24.13.0 <25"
+  },
+  "workspaces": [
+    "apps/web",
+    "packages/core",
+    "packages/db",
+    "packages/integrations"
+  ],
   "scripts": {
     "dev": "node --env-file-if-exists=.env --watch apps/web/server.js",
     "start": "node --env-file-if-exists=.env apps/web/server.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --experimental-vm-modules --experimental-test-module-mocks --test tests/*.test.js",
     "check": "node scripts/check.js",
     "seed": "node --env-file-if-exists=.env scripts/seed.js",
-    "backup": "node --env-file-if-exists=.env scripts/backup.js"
+    "backup": "node --env-file-if-exists=.env scripts/backup.js",
+    "test:postgres": "REGULARS_TEST_DB=postgres node --experimental-vm-modules --experimental-test-module-mocks --test-concurrency=2 --test tests/*.test.js",
+    "test:coverage": "node --experimental-vm-modules --experimental-test-module-mocks --experimental-test-coverage --test-coverage-include='apps/**/*.js' --test-coverage-include='packages/**/*.js' --test-coverage-include='api/**/*.js' --test-coverage-include='scripts/seed.js' --test-coverage-include='scripts/backup.js' --test-coverage-include='scripts/operator.js' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/coverage-report.js --test-reporter-destination=coverage-summary.json --test tests/*.test.js",
+    "operator": "node --env-file-if-exists=.env scripts/operator.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.0.2",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
   }
 }

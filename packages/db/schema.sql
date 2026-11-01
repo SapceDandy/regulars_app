@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS audit(
  action TEXT NOT NULL, subject_id TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS payment_events(id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS refund_reviews(
+ order_id TEXT PRIMARY KEY REFERENCES orders(id), refunded_cents INTEGER NOT NULL CHECK(refunded_cents>0),
+ status TEXT NOT NULL CHECK(status IN('open','reviewed','closed')), note TEXT NOT NULL DEFAULT '',
+ reviewed_by TEXT REFERENCES users(id), reviewed_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS outbox(
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, subject_id TEXT NOT NULL, payload TEXT NOT NULL,
  attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
@@ -117,4 +122,21 @@ CREATE TABLE IF NOT EXISTS campaigns(
 );
 CREATE TABLE IF NOT EXISTS leads(
  id TEXT PRIMARY KEY, venue_name TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS job_leases(
+ job_id TEXT PRIMARY KEY REFERENCES outbox(id), token TEXT NOT NULL, expires_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_cases(
+ id TEXT PRIMARY KEY, kind TEXT NOT NULL, reference TEXT NOT NULL, payment_intent TEXT,
+ order_id TEXT REFERENCES orders(id), amount_cents INTEGER, currency TEXT NOT NULL,
+ provider_status TEXT NOT NULL, due_at INTEGER, created_at INTEGER NOT NULL,
+ note TEXT NOT NULL DEFAULT '', reviewed_by TEXT REFERENCES users(id), reviewed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS pos_payments(
+ id TEXT PRIMARY KEY, venue_id TEXT NOT NULL REFERENCES venues(id), amount_cents INTEGER NOT NULL,
+ currency TEXT NOT NULL, refunded_cents INTEGER NOT NULL DEFAULT 0, paid_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+ status TEXT NOT NULL DEFAULT 'open' CHECK(status IN('open','serve','dismiss')),
+ bottle_id TEXT REFERENCES bottles(id), served_ml INTEGER,
+ note TEXT NOT NULL DEFAULT '', handled_by TEXT REFERENCES users(id), handled_at INTEGER
 );

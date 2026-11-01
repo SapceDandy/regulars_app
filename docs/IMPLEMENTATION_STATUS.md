@@ -1,6 +1,30 @@
 # Implementation and verification status
 
+## November 1 — admin authorization and concurrent access verification
+
+Four new regressions verify that client-supplied roles cannot grant manager access, competing manager revocations preserve one authorized manager, concurrent operator demotions cannot remove the last manager, and revoked staff cannot submit stale Square/stock forms after signing back in. All four pass on SQLite and embedded PostgreSQL/PGlite. Syntax checks and the full 161-test suite pass with 100% measured runtime coverage. No runtime implementation changed. These local checks do not replace hosted, physical-device or provider-delivered acceptance.
+
+## November 1 — Wallet secrets for serverless deployment
+
+Wallet signing now accepts server-only Apple certificate/key/WWDR PEM secrets and a Google private-key PEM secret, with mounted-file compatibility retained. Apple signing uses owner-readable temporary files and removes them after success or failure; Google signing and APNs TLS can read secrets directly in memory. Two new regressions verify actual self-signed Apple packages, Google signatures, secret-free configuration responses, missing-key readiness, cleanup on signing failure and mocked OAuth/APNs transports. Syntax checks and 157 tests pass, with 100% measured runtime coverage. Provider account approval, trusted certificates, actual Vercel signing and physical-device acceptance remain open; no native Wallet readiness is claimed.
+
+## November 1 — payment rehearsal and accessibility audit
+
+Actual Regulars Stripe sandbox checkout and CLI-forwarded signed webhooks passed against an isolated local test fixture: activation, decline, 3D Secure retry, duplicate/tampered events, partial/full refunds, manager review, cancellation and hold release. All sandbox payments were refunded and unused sessions expired. A reusable opt-in procedure is in [tests/manual/README.md](../tests/manual/README.md). Hosted return URLs and Vercel webhook delivery remain separate gates.
+
+The hosted dialog audit found missing accessible names. Shared dialogs now associate their visible heading with the native dialog. Keyboard Tab and Escape behavior were exercised; this is not physical-device or screen-reader acceptance. Syntax checks, all 155 tests and 100% measured runtime line/branch/function coverage pass. The dependency audit reported zero known vulnerabilities. Overall planning progress remains 13 of 20 workstreams (65%); provider, device, hosted-operations and venue-acceptance gates remain open. No production promotion is included.
+
 Prepared October 15, 2026; repository references updated October 16, 2026. The application destination is [SapceDandy/regulars_app](https://github.com/SapceDandy/regulars_app); the separate concept destination is [SapceDandy/regulars_brain](https://github.com/SapceDandy/regulars_brain). Both user-created repositories were discovered through the connected GitHub account. This application source is intended for regulars_app, with the existing public visibility preserved. Remote publication does not establish live deployment or provider readiness.
+
+## Vercel preparation — October 30, 2026
+
+Vercel project `regulars-app` and Neon database `regulars-pilot-db` are provisioned and linked for preview/production. The new adapter uses PostgreSQL and request-scoped pools, authenticated cron, and durable job leases. Local demo remains localhost-only. Live-provider preview requires Stripe test credentials; missing configuration returns 503. An explicitly enabled, Vercel-authenticated synthetic preview now supports testing without provider accounts in a separate regulars_pilot schema.
+
+Local test evidence covers SQLite and embedded PostgreSQL. Real Neon concurrent workers, Vercel raw webhook forwarding, cron execution, SMS receipt, real Stripe sandbox delivery and native Wallet devices still require hosted verification. Stripe/Twilio credentials and operator-reviewed venue configuration are absent; full live deployment remains blocked. See [Vercel setup](VERCEL.md).
+
+## Synthetic hosted pilot — October 30, 2026
+
+The protected preview now runs guest/manager fixtures, simulated checkout and refunds, and persistent Neon transactions. Hosted browser testing covered discovery, memberships, season reservations, resource exclusion, queues, bottle service, role denial, inquiry and promotion approval. Narrow-phone navigation, search counts and pass dates were corrected. The October 31 follow-up brings both database test suites to 60 passing tests, adds profile/FAQ/calendar browser evidence, protects unsaved edits from background refresh, and improves mobile staff navigation. The next round verified private locker allocation, early-renewal rejection, unpaid-hold cancellation and party-size adjustment. Dialog errors now stay inside the open dialog, cancelled/expired checkout headings reflect their state, guest counts use singular/plural copy, and disabled Wallet controls explain the test limitation. Hosted rechecks for this last UI change are recorded in the pilot report. This does not verify real payments, SMS or native Wallet delivery. Square is not implemented; the existing payment adapter is Stripe. See [pilot test report](PILOT_TEST_REPORT_2026-10-30.md).
 
 ## Implemented and exercised locally
 
@@ -30,7 +54,7 @@ Run `npm run check` and `npm test` for current results. The final build records 
 - Apple certificate trust, iPhone installation, APNs connection and device refresh.
 - Google issuer/class permissions, Android saving and remote object updates.
 - Live host/TLS configuration, backups/restore, payment reconciliation and staff rehearsal.
-- Browser visual/accessibility/device QA. Browser control was unavailable, so UI source and HTTP flows were checked without screenshots or browser automation.
+- Full accessibility audit and real-device QA. Hosted Chromium browser workflows and responsive frame checks were completed October 30; see the pilot report.
 
 ## Not implemented in this release
 

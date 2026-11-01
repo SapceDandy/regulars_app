@@ -12,3 +12,4 @@ coverage/
 *.sqlite*
 *.pkpass
 .DS_Store
+coverage-summary.json

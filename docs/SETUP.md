@@ -41,7 +41,7 @@ Use Stripe sandbox/test credentials first. Set `STRIPE_SECRET_KEY` and `STRIPE_W
 https://your-real-regulars-domain/api/webhooks/stripe
 ```
 
-Subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `charge.refunded`. Checkout is restricted to immediate card payments in this release; the async success handler is present for explicit future extension. Only a paid, amount/currency/session-matching event activates an order.
+Subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `charge.dispute.funds_withdrawn`, and `charge.dispute.funds_reinstated` (snapshot events). Payment methods are configured in the Stripe Dashboard. Validate the enabled methods against the 31-minute inventory hold: a payment that arrives after its hold expires is refunded rather than allocated. Only a paid, amount/currency/session/payment-reference-matching event activates an order.
 
 Test card success/decline, interrupted checkout and resume, duplicate webhooks, capacity conflicts, cancelled holds, refund pending/failure, and late webhook compensation. Compare app orders to the processor dashboard before changing to live keys. One deployment uses one merchant account. Independent-merchant routing, transfers, payouts, platform fees and settlement are future Stripe Connect work.
 
@@ -73,13 +73,13 @@ The Dockerfile uses the non-root `node` user. Provision `/data` writable by UID 
 
 ## 8. Operations and changes
 
-- `npm run backup` uses SQLite's online backup API into ignored `backups/`. Put encrypted backups on independent durable storage and rehearse restoration before launch.
+- `npm run backup` is for local SQLite only. It opens an existing `DATABASE_PATH` read-only, uses SQLite's online backup API, and publishes a complete owner-readable file into ignored `backups/`. A missing source or configured `DATABASE_URL` fails instead of producing a misleading empty/local backup. For hosted Neon, use the PostgreSQL provider's backup/restore workflow. Put encrypted backups on independent durable storage and rehearse restoration before launch.
 - `npm run seed` initializes missing venues and **preserves existing configuration**. It will not silently rewrite active venue records, resources, prices or booked games.
 - New location: add another complete venue block with a unique ID/slug to private config, run initialization, then review `/v/<slug>` and role isolation. Use only locations under the configured merchant until multi-merchant settlement exists.
 - Existing-venue changes need an explicit migration/admin workflow. Do not edit booked game times or physical allocation modes directly without checking current orders and informing affected guests.
 - Staff access comes from approved config on first initialization. Changes to existing staff require an explicit operator migration; an invitation/admin screen is a roadmap item.
 - Partner inquiries are stored in `leads`. They are not emailed. The trusted operator can review them through a private database/admin workflow.
-- Review the venue **Sync status** tab, membership expiration, refunds and service discrepancies daily. Run a physical-stock reconciliation with staff during the pilot.
+- Review **Payment reviews** and **Sync status**, membership expiration and service discrepancies daily. Partial refunds preserve benefits, reduce recorded collected value and open a review. Managers must verify the provider record and agree service changes with the guest before saving a note. Additional refunds reopen review; full refunds close it automatically. Saving a note never moves money or changes benefits. Dispute reports appear with provider references and reported deadlines; handle evidence and financial decisions in Stripe, then record the review. Use the operator report for unmatched events. See [operator and Square setup](../OPERATIONS.md). Run a physical-stock reconciliation with staff during the pilot.
 
 ## Release rehearsal
 

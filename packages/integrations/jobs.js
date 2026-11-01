@@ -1,20 +1,37 @@
+import { id } from '../core/rules.js';
+
 export class Jobs {
   constructor(store,regulars,{wallets,payments}) {this.s=store;this.app=regulars;this.wallets=wallets;this.payments=payments;this.busy=false;}
   async tick() {
     if(this.busy)return;this.busy=true;
     try {
-      this.app.cleanup();
-      for(const job of this.s.all("SELECT * FROM outbox WHERE status='pending' AND next_at<=? ORDER BY created_at LIMIT 10",this.app.now())) {
+      await this.app.cleanup();
+      for(let i=0;i<10;i++) {
+        const token=id();
+        const job=await this.s.transaction(async()=>{
+          const now=this.app.now();
+          const next=await this.s.get("SELECT o.* FROM outbox o LEFT JOIN job_leases l ON l.job_id=o.id WHERE o.status='pending' AND o.next_at<=? AND (l.job_id IS NULL OR l.expires_at<=?) ORDER BY o.created_at LIMIT 1",now,now);
+          if(!next)return null;
+          await this.s.run('INSERT INTO job_leases(job_id,token,expires_at) VALUES(?,?,?) ON CONFLICT(job_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at',next.id,token,now+300_000);
+          return next;
+        });
+        if(!job)break;
+        let error;
         try {
           if(job.kind==='wallet')await this.wallets.update(job.subject_id);
           else if(job.kind==='refund')await this.payments.refund(job.subject_id);
           else throw new Error('Unknown job kind');
-          this.s.run("UPDATE outbox SET status='done',last_error=NULL WHERE id=?",job.id);
-        } catch(error) {
-          const attempts=job.attempts+1;
-          // Generic failure text is safe for staff visibility; provider bodies are never stored.
-          this.s.run('UPDATE outbox SET attempts=?,next_at=?,status=?,last_error=? WHERE id=?',attempts,this.app.now()+Math.min(3_600_000,30_000*2**attempts),attempts>=8?'failed':'pending',`Delivery failed (${error.status??500}).`,job.id);
-        }
+        } catch(cause) {error=cause;}
+        await this.s.transaction(async()=>{
+          const lease=await this.s.get('SELECT token FROM job_leases WHERE job_id=?',job.id);
+          if(lease?.token!==token)return;
+          if(!error)await this.s.run("UPDATE outbox SET status='done',last_error=NULL WHERE id=?",job.id);
+          else {
+            const attempts=job.attempts+1;
+            await this.s.run('UPDATE outbox SET attempts=?,next_at=?,status=?,last_error=? WHERE id=?',attempts,this.app.now()+Math.min(3_600_000,30_000*2**attempts),attempts>=8?'failed':'pending',`Delivery failed (${error.status??500}).`,job.id);
+          }
+          await this.s.run('DELETE FROM job_leases WHERE job_id=? AND token=?',job.id,token);
+        });
       }
     } finally {this.busy=false;}
   }

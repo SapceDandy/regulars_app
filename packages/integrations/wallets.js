@@ -8,6 +8,11 @@ import { equal, requireThat, Problem } from '../core/rules.js';
 import { zip } from './zip.js';
 import { providerFetch } from './http.js';
 
+// Server-only PEM secrets support hosts without certificate mounts. PEM wins
+// when both sources exist; never expose either source through /api/config.
+function material(env,name) {return env[`${name}_PEM`]?Buffer.from(env[`${name}_PEM`]):readFileSync(env[`${name}_PATH`]);}
+function configuredMaterial(env,name) {return !!(env[`${name}_PEM`]||env[`${name}_PATH`]);}
+
 function jwt(payload,key) {
   const content=[{alg:'RS256',typ:'JWT'},payload].map(v=>Buffer.from(JSON.stringify(v)).toString('base64url')).join('.');
   return `${content}.${createSign('RSA-SHA256').update(content).sign(key).toString('base64url')}`;
@@ -30,43 +35,46 @@ export function googleDocument(member,config,next) {
     linksModuleData:{uris:[{id:'account',uri:`${config.origin}/account`,description:'View your account'}]},validTimeInterval:{start:{date:new Date(member.starts_at).toISOString()},end:{date:new Date(member.ends_at).toISOString()}}};
 }
 export class Wallets {
-  constructor(store,regulars,config,{request=providerFetch}={}) {this.s=store;this.app=regulars;this.config=config;this.request=request;this.access=null;}
+  constructor(store,regulars,config,{request=providerFetch,connect:connectPush=connect}={}) {this.s=store;this.app=regulars;this.config=config;this.request=request;this.connectPush=connectPush;this.access=null;}
   readiness() {
-    const e=this.config.env;return {apple:this.config.mode==='live'&&['APPLE_PASS_TYPE_ID','APPLE_TEAM_ID','APPLE_CERT_PATH','APPLE_KEY_PATH','APPLE_WWDR_PATH'].every(k=>!!e[k]),google:this.config.mode==='live'&&['GOOGLE_ISSUER_ID','GOOGLE_CLASS_ID','GOOGLE_SERVICE_ACCOUNT_EMAIL','GOOGLE_PRIVATE_KEY_PATH'].every(k=>!!e[k])};
+    const e=this.config.env;return {apple:this.config.mode==='live'&&['APPLE_PASS_TYPE_ID','APPLE_TEAM_ID'].every(k=>!!e[k])&&['APPLE_CERT','APPLE_KEY','APPLE_WWDR'].every(k=>configuredMaterial(e,k)),google:this.config.mode==='live'&&['GOOGLE_ISSUER_ID','GOOGLE_CLASS_ID','GOOGLE_SERVICE_ACCOUNT_EMAIL'].every(k=>!!e[k])&&configuredMaterial(e,'GOOGLE_PRIVATE_KEY')};
   }
-  next(member) {return this.s.get("SELECT e.title,r.starts_at,s.label resource_label FROM reservations r JOIN orders o ON o.id=r.order_id JOIN events e ON e.id=r.event_id JOIN resources s ON s.id=r.resource_id WHERE o.user_id=? AND o.venue_id=? AND r.state IN('confirmed','attended') AND r.ends_at>? ORDER BY r.starts_at LIMIT 1",member.user_id,member.venue_id,this.app.now());}
-  assertOwner(userId,mid) {const m=this.s.get('SELECT * FROM memberships WHERE id=? AND user_id=?',mid,userId);requireThat(m,404,'Pass not found.');return m;}
-  authorizeApple(mid,header) {
-    const m=this.s.get('SELECT * FROM memberships WHERE id=?',mid);requireThat(m&&equal(header,`ApplePass ${m.pass_auth}`),401,'Invalid pass authorization.');return m;
+  async next(member) {return (await this.s.get("SELECT e.title,r.starts_at,s.label resource_label FROM reservations r JOIN orders o ON o.id=r.order_id JOIN events e ON e.id=r.event_id JOIN resources s ON s.id=r.resource_id WHERE o.user_id=? AND o.venue_id=? AND r.state IN('confirmed','attended') AND r.ends_at>? ORDER BY r.starts_at LIMIT 1",member.user_id,member.venue_id,this.app.now()));}
+  async assertOwner(userId,mid) {const m=(await this.s.get('SELECT * FROM memberships WHERE id=? AND user_id=?',mid,userId));requireThat(m,404,'Pass not found.');return m;}
+  async authorizeApple(mid,header) {
+    const m=(await this.s.get('SELECT * FROM memberships WHERE id=?',mid));requireThat(m&&equal(header,`ApplePass ${m.pass_auth}`),401,'Invalid pass authorization.');return m;
   }
-  apple(mid) {
+  async apple(mid) {
     requireThat(this.readiness().apple,503,'Apple Wallet needs the pass certificate and HTTPS setup.');
-    const m=this.app.membershipSnapshot(mid);const secret=this.s.get('SELECT pass_auth FROM memberships WHERE id=?',mid).pass_auth;
-    const files={'pass.json':Buffer.from(JSON.stringify(appleDocument(m,secret,this.config,this.next(m)))),'icon.png':readFileSync(new URL('../../apps/web/public/assets/icon.png',import.meta.url)),'icon@2x.png':readFileSync(new URL('../../apps/web/public/assets/icon@2x.png',import.meta.url)),'icon@3x.png':readFileSync(new URL('../../apps/web/public/assets/icon@3x.png',import.meta.url))};
+    const m=(await this.app.membershipSnapshot(mid));const secret=(await this.s.get('SELECT pass_auth FROM memberships WHERE id=?',mid)).pass_auth;
+    const files={'pass.json':Buffer.from(JSON.stringify(appleDocument(m,secret,this.config,(await this.next(m))))),'icon.png':readFileSync(new URL('../../apps/web/public/assets/icon.png',import.meta.url)),'icon@2x.png':readFileSync(new URL('../../apps/web/public/assets/icon@2x.png',import.meta.url)),'icon@3x.png':readFileSync(new URL('../../apps/web/public/assets/icon@3x.png',import.meta.url))};
     const manifest=Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(files).map(([name,data])=>[name,createHash('sha1').update(data).digest('hex')]))));
     const temp=mkdtempSync(join(tmpdir(),'regulars-pass-'));const e=this.config.env;
     try {
       writeFileSync(join(temp,'manifest.json'),manifest,{mode:0o600});
-      // argv only; no shell interpolation. Certificates remain external to the repository.
-      execFileSync('openssl',['smime','-binary','-sign','-signer',e.APPLE_CERT_PATH,'-inkey',e.APPLE_KEY_PATH,'-certfile',e.APPLE_WWDR_PATH,'-in',join(temp,'manifest.json'),'-out',join(temp,'signature'),'-outform','DER'],{stdio:'pipe',timeout:10_000});
+      for(const name of ['APPLE_CERT','APPLE_KEY','APPLE_WWDR'])writeFileSync(join(temp,`${name}.pem`),material(e,name),{mode:0o600});
+      // Fixed argv paths only; the private temporary directory is removed even on failure.
+      execFileSync('openssl',['smime','-binary','-sign','-signer',join(temp,'APPLE_CERT.pem'),'-inkey',join(temp,'APPLE_KEY.pem'),'-certfile',join(temp,'APPLE_WWDR.pem'),'-in',join(temp,'manifest.json'),'-out',join(temp,'signature'),'-outform','DER'],{stdio:'pipe',timeout:10_000});
       files['manifest.json']=manifest;files.signature=readFileSync(join(temp,'signature'));return zip(files);
     } finally {rmSync(temp,{recursive:true,force:true});}
   }
-  google(mid) {
+  async google(mid) {
     requireThat(this.readiness().google,503,'Google Wallet needs an issuer, class and service account.');
-    const e=this.config.env;const m=this.app.membershipSnapshot(mid);
-    const token=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,aud:'google',typ:'savetowallet',iat:Math.floor(this.app.now()/1000),origins:[this.config.origin],payload:{genericObjects:[googleDocument(m,this.config,this.next(m))]}},readFileSync(e.GOOGLE_PRIVATE_KEY_PATH));
+    const e=this.config.env;const m=(await this.app.membershipSnapshot(mid));
+    const token=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,aud:'google',typ:'savetowallet',iat:Math.floor(this.app.now()/1000),origins:[this.config.origin],payload:{genericObjects:[googleDocument(m,this.config,(await this.next(m)))]}},material(e,'GOOGLE_PRIVATE_KEY'));
     return `https://pay.google.com/gp/v/save/${token}`;
   }
-  register(device,mid,pushToken) {requireThat(device.length<=256&&typeof pushToken==='string'&&/^[A-Fa-f0-9]{32,512}$/.test(pushToken),400,'Invalid device registration.');const old=this.s.get('SELECT device_id FROM apple_registrations WHERE device_id=? AND membership_id=?',device,mid);this.s.run('INSERT INTO apple_registrations VALUES(?,?,?) ON CONFLICT(device_id,membership_id) DO UPDATE SET push_token=excluded.push_token',device,mid,pushToken);return old?200:201;}
+  async register(device,mid,pushToken) {requireThat(device.length<=256&&typeof pushToken==='string'&&/^[A-Fa-f0-9]{32,512}$/.test(pushToken),400,'Invalid device registration.');const old=(await this.s.get('SELECT device_id FROM apple_registrations WHERE device_id=? AND membership_id=?',device,mid));(await this.s.run('INSERT INTO apple_registrations VALUES(?,?,?) ON CONFLICT(device_id,membership_id) DO UPDATE SET push_token=excluded.push_token',device,mid,pushToken));return old?200:201;}
   async googleAccess() {
     if(this.access&&this.access.expires>Date.now())return this.access.token;
     const e=this.config.env;const now=Math.floor(Date.now()/1000);
-    const assertion=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,scope:'https://www.googleapis.com/auth/wallet_object.issuer',aud:'https://oauth2.googleapis.com/token',iat:now,exp:now+3600},readFileSync(e.GOOGLE_PRIVATE_KEY_PATH));
-    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});const data=await response.json();this.access={token:data.access_token,expires:Date.now()+Math.max(0,data.expires_in-60)*1000};return this.access.token;
+    const assertion=jwt({iss:e.GOOGLE_SERVICE_ACCOUNT_EMAIL,scope:'https://www.googleapis.com/auth/wallet_object.issuer',aud:'https://oauth2.googleapis.com/token',iat:now,exp:now+3600},material(e,'GOOGLE_PRIVATE_KEY'));
+    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});const data=await response.json();
+    requireThat(typeof data?.access_token==='string'&&data.access_token.length>0&&Number.isFinite(data.expires_in)&&data.expires_in>0,502,'Google Wallet authorization returned an invalid token.');
+    this.access={token:data.access_token,expires:Date.now()+Math.max(0,data.expires_in-60)*1000};return this.access.token;
   }
   async updateGoogle(mid) {
-    const m=this.app.membershipSnapshot(mid);const body=googleDocument(m,this.config,this.next(m));const access=await this.googleAccess();
+    const m=(await this.app.membershipSnapshot(mid));const body=googleDocument(m,this.config,(await this.next(m)));const access=await this.googleAccess();
     const url=`https://walletobjects.googleapis.com/walletobjects/v1/genericObject/${encodeURIComponent(body.id)}`;
     let res=await fetch(url,{method:'PATCH',headers:{authorization:`Bearer ${access}`,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12_000)});
     if(res.status===404) res=await fetch('https://walletobjects.googleapis.com/walletobjects/v1/genericObject',{method:'POST',headers:{authorization:`Bearer ${access}`,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12_000)});
@@ -75,18 +83,19 @@ export class Wallets {
   pushApple(token) {
     const e=this.config.env;
     return new Promise((resolve,reject)=>{
-      const session=connect('https://api.push.apple.com',{cert:readFileSync(e.APPLE_CERT_PATH),key:readFileSync(e.APPLE_KEY_PATH)});
-      let done=false;const finish=(error)=>{if(done)return;done=true;session.close();error?reject(error):resolve();};
+      const session=this.connectPush('https://api.push.apple.com',{cert:material(e,'APPLE_CERT'),key:material(e,'APPLE_KEY')});
+      let done=false,removing=false;const finish=(error)=>{if(done)return;done=true;session.close();error?reject(error):resolve();};
       session.setTimeout(12_000,()=>finish(new Problem(502,'Apple update timed out.')));session.on('error',finish);
       const req=session.request({':method':'POST',':path':`/3/device/${token}`,'apns-topic':e.APPLE_PASS_TYPE_ID,'apns-push-type':'background','apns-priority':'5'});
-      req.on('response',headers=>{const status=Number(headers[':status']);if(status===410) {this.s.run('DELETE FROM apple_registrations WHERE push_token=?',token);finish();}else if(status!==200)finish(new Problem(502,`Apple update failed (${status}).`));});
-      req.on('data',()=>{});req.on('end',()=>finish());req.on('error',finish);req.end('{}');
+      req.on('response',headers=>{const status=Number(headers[':status']);if(status===410) {removing=true;this.s.run('DELETE FROM apple_registrations WHERE push_token=?',token).then(()=>finish(),finish);}else if(status!==200)finish(new Problem(502,`Apple update failed (${status}).`));});
+      req.on('data',()=>{});req.on('end',()=>{if(!removing)finish();});req.on('error',finish);req.end('{}');
     });
   }
   async update(mid) {
     const ready=this.readiness();if(this.config.mode==='demo')return;
     requireThat(ready.apple&&ready.google,503,'Complete both Wallet configurations before syncing.');
-    const results=await Promise.allSettled([this.updateGoogle(mid),...this.s.all('SELECT DISTINCT push_token FROM apple_registrations WHERE membership_id=?',mid).map(r=>this.pushApple(r.push_token))]);
+    const registrations=await this.s.all('SELECT DISTINCT push_token FROM apple_registrations WHERE membership_id=?',mid);
+    const results=await Promise.allSettled([this.updateGoogle(mid),...registrations.map(r=>this.pushApple(r.push_token))]);
     const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;
   }
 }
