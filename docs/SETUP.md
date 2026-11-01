@@ -73,7 +73,7 @@ The Dockerfile uses the non-root `node` user. Provision `/data` writable by UID 
 
 ## 8. Operations and changes
 
-- `npm run backup` uses SQLite's online backup API into ignored `backups/`. Put encrypted backups on independent durable storage and rehearse restoration before launch.
+- `npm run backup` is for local SQLite only. It opens an existing `DATABASE_PATH` read-only, uses SQLite's online backup API, and publishes a complete owner-readable file into ignored `backups/`. A missing source or configured `DATABASE_URL` fails instead of producing a misleading empty/local backup. For hosted Neon, use the PostgreSQL provider's backup/restore workflow. Put encrypted backups on independent durable storage and rehearse restoration before launch.
 - `npm run seed` initializes missing venues and **preserves existing configuration**. It will not silently rewrite active venue records, resources, prices or booked games.
 - New location: add another complete venue block with a unique ID/slug to private config, run initialization, then review `/v/<slug>` and role isolation. Use only locations under the configured merchant until multi-merchant settlement exists.
 - Existing-venue changes need an explicit migration/admin workflow. Do not edit booked game times or physical allocation modes directly without checking current orders and informing affected guests.

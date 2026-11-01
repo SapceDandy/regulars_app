@@ -43,6 +43,20 @@ test('two workers claim one delivery and recover a stale lease', async t => {
 function response() {
   return {headersSent: false, setHeader() {}, writeHead(status) {this.status=status;this.headersSent=true;}, end(body) {this.body=body;}};
 }
+
+test('a slow worker cannot mark a reclaimed delivery done after the new worker fails',async t=>{
+  const f=await fixture();t.after(()=>f.s.close());
+  await f.s.run("INSERT INTO outbox(id,kind,subject_id,payload,attempts,next_at,status,created_at) VALUES('fenced','wallet','member','{}',0,?,'pending',?)",f.now(),f.now());
+  let started,release;
+  const entered=new Promise(resolve=>{started=resolve;});const blocked=new Promise(resolve=>{release=resolve;});
+  const first=new Jobs(f.s,f.app,{wallets:{update:async()=>{started();await blocked;}},payments:{}}).tick();
+  await entered;f.advance(300001);
+  try{
+    await new Jobs(f.s,f.app,{wallets:{update:async()=>{throw new Error('retry later');}},payments:{}}).tick();
+  }finally{release();await first;}
+  const job=await f.s.get("SELECT * FROM outbox WHERE id='fenced'");
+  assert.equal(job.status,'pending');assert.equal(job.attempts,1);assert.ok(job.next_at>f.now());
+});
 const env = {DATABASE_URL: 'test', SESSION_SECRET: 'x'.repeat(32), PUBLIC_ORIGIN: 'https://regulars.example', TWILIO_ACCOUNT_SID: 'test', TWILIO_AUTH_TOKEN: 'test', TWILIO_VERIFY_SERVICE_SID: 'test', STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_WEBHOOK_SECRET: 'test', VENUE_CONFIG_JSON: '{"venues":[]}', CRON_SECRET: 'cron-test'};
 
 test('cron rejects missing credentials before opening the database', async () => {

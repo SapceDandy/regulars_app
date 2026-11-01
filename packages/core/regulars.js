@@ -218,10 +218,12 @@ export class Regulars {
   }
   async checkIn(actorId,rid,action) {
     return (await this.s.transaction(async ()=>{
-      const r=(await this.s.get('SELECT r.*,o.venue_id FROM reservations r JOIN orders o ON o.id=r.order_id WHERE r.id=?',rid));requireThat(r,404,'Reservation not found.');(await this.staff(actorId,r.venue_id));
+      const r=(await this.s.get('SELECT r.*,o.venue_id,o.user_id FROM reservations r JOIN orders o ON o.id=r.order_id WHERE r.id=?',rid));requireThat(r,404,'Reservation not found.');(await this.staff(actorId,r.venue_id));
       requireThat(['attended','no_show'].includes(action),400,'Invalid check-in action.');requireThat(r.state==='confirmed',409,'This reservation has already been processed.');
       requireThat(action!=='no_show'||this.now()>r.checkin_deadline,409,'The check-in grace period has not ended.');requireThat(action!=='attended'||this.now()>=r.starts_at-60*60_000,409,'Check-in opens one hour before the game.');
-      (await this.s.run('UPDATE reservations SET state=?,checked_in_at=? WHERE id=?',action,action==='attended'?this.now():null,rid));(await this.audit(r.venue_id,actorId,`reservation.${action}`,rid));return {state:action};
+      (await this.s.run('UPDATE reservations SET state=?,checked_in_at=? WHERE id=?',action,action==='attended'?this.now():null,rid));(await this.audit(r.venue_id,actorId,`reservation.${action}`,rid));
+      if(action==='no_show')for(const m of await this.s.all('SELECT id FROM memberships WHERE user_id=? AND venue_id=?',r.user_id,r.venue_id))await this.touch(m.id);
+      return {state:action};
     }));
   }
   async queueAction(actorId,qid,action) {
