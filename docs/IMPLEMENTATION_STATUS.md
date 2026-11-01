@@ -1,5 +1,9 @@
 # Implementation and verification status
 
+## November 1 — admin authorization and concurrent access verification
+
+Four new regressions verify that client-supplied roles cannot grant manager access, competing manager revocations preserve one authorized manager, concurrent operator demotions cannot remove the last manager, and revoked staff cannot submit stale Square/stock forms after signing back in. All four pass on SQLite and embedded PostgreSQL/PGlite. Syntax checks and the full 161-test suite pass with 100% measured runtime coverage. No runtime implementation changed. These local checks do not replace hosted, physical-device or provider-delivered acceptance.
+
 ## November 1 — Wallet secrets for serverless deployment
 
 Wallet signing now accepts server-only Apple certificate/key/WWDR PEM secrets and a Google private-key PEM secret, with mounted-file compatibility retained. Apple signing uses owner-readable temporary files and removes them after success or failure; Google signing and APNs TLS can read secrets directly in memory. Two new regressions verify actual self-signed Apple packages, Google signatures, secret-free configuration responses, missing-key readiness, cleanup on signing failure and mocked OAuth/APNs transports. Syntax checks and 157 tests pass, with 100% measured runtime coverage. Provider account approval, trusted certificates, actual Vercel signing and physical-device acceptance remain open; no native Wallet readiness is claimed.
