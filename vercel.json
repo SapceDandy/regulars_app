@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npm run check && npm run verify:database && node tests/manual/hosted-postgres.mjs",
+  "buildCommand": "npm run check && npm run verify:database && node tests/manual/hosted-postgres.mjs && node tests/manual/hosted-stripe-account.mjs",
   "functions": {
     "api/index.js": {
       "maxDuration": 300,

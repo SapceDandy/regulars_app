@@ -87,3 +87,14 @@ The logical snapshot stays in process memory: this is **not** proof of off-site
 backup retention, point-in-time recovery, public Vercel HTTP behavior, scheduled
 cron, real provider delivery or device acceptance. Disable the rehearsal flag
 after collecting its evidence.
+
+## Hosted Stripe sandbox identity
+
+`node tests/manual/hosted-stripe-account.mjs` is skipped unless
+`REGULARS_STRIPE_ACCOUNT_CHECK` equals the approved Regulars sandbox account ID.
+It requires Vercel Preview, `codex/provider-pilot`, and a test secret already
+stored in Vercel. The key is used only in memory for `GET /v1/account` at Stripe's
+fixed API origin, without a connected-account header or redirects. Only a
+matching account ID passes; logs omit account details, response bodies and keys.
+No customer, payment or webhook is created. Disable the flag afterward. This
+checks account isolation and authentication, not Checkout or webhook delivery.
