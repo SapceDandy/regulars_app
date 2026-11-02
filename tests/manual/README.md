@@ -57,3 +57,33 @@ webhook delivery separately before enabling a business pilot.
 References: [Stripe test cards](https://docs.stripe.com/testing),
 [Stripe CLI](https://docs.stripe.com/cli), and
 [webhook testing](https://docs.stripe.com/webhooks/quickstart).
+
+# Hosted PostgreSQL contention and recovery rehearsal
+
+`node tests/manual/hosted-postgres.mjs` is skipped unless `REGULARS_HOSTED_REHEARSAL`
+is explicitly set to the expected Supabase project ref. It also requires Vercel
+Preview, the `codex/provider-pilot` branch, Supabase selection, the expected
+`regulars_runtime.<project-ref>` pooler user and verified TLS. Never enable it
+on production or on a KUDJO database.
+
+An administrator must first provision the existing PostgreSQL schema in a
+separate `regulars_pilot` schema owned by `regulars_runtime`, enable RLS on all
+29 tables, and deny schema access to PUBLIC, anon and authenticated. This is
+separate from both the provider `regulars` schema and the older Neon synthetic
+preview. The harness refuses nonempty fixture tables; its transactionally
+inserted ownership marker prevents overlapping rehearsals.
+
+Independent Node child processes each open their own PostgreSQL pool. The checks
+cover booking contention, checkout replay, bottle retry/overdraw, synthetic
+Square matching, rollback, the last manager, leased jobs, stale-lease recovery,
+delivery outage/retry, logical snapshot restoration and unchanged provider-schema
+counts. Only reserved fictional phone numbers are inserted. No external payment,
+SMS or Wallet client is created. All fixture rows are removed after the run;
+metadata rows return to their initial values. If a process is forcibly killed,
+inspect the leftover fixtures before attempting cleanup or another run.
+
+Logs contain pass/fail labels, not credentials, rows or raw provider events.
+The logical snapshot stays in process memory: this is **not** proof of off-site
+backup retention, point-in-time recovery, public Vercel HTTP behavior, scheduled
+cron, real provider delivery or device acceptance. Disable the rehearsal flag
+after collecting its evidence.
