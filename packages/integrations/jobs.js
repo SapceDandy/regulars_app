@@ -10,7 +10,9 @@ export class Jobs {
         const token=id();
         const job=await this.s.transaction(async()=>{
           const now=this.app.now();
-          const next=await this.s.get("SELECT o.* FROM outbox o LEFT JOIN job_leases l ON l.job_id=o.id WHERE o.status='pending' AND o.next_at<=? AND (l.job_id IS NULL OR l.expires_at<=?) ORDER BY o.created_at LIMIT 1",now,now);
+          // Serialize deliveries for one subject, not just one job ID: two queued
+          // Wallet snapshots must not race and let an older balance finish last.
+          const next=await this.s.get("SELECT o.* FROM outbox o WHERE o.status='pending' AND o.next_at<=? AND NOT EXISTS (SELECT 1 FROM outbox active JOIN job_leases lease ON lease.job_id=active.id WHERE active.kind=o.kind AND active.subject_id=o.subject_id AND lease.expires_at>?) ORDER BY o.created_at LIMIT 1",now,now);
           if(!next)return null;
           await this.s.run('INSERT INTO job_leases(job_id,token,expires_at) VALUES(?,?,?) ON CONFLICT(job_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at',next.id,token,now+300_000);
           return next;

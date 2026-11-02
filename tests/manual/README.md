@@ -88,6 +88,13 @@ backup retention, point-in-time recovery, public Vercel HTTP behavior, scheduled
 cron, real provider delivery or device acceptance. Disable the rehearsal flag
 after collecting its evidence.
 
+The follow-up also pauses one worker after it reads a member's Wallet snapshot,
+records another pour, and runs a second worker. The same member must remain
+queued until the first delivery finishes; another member must still update.
+A synthetic remote-balance record must finish with the newest value. A separate
+check verifies that subject blocking ends at lease expiry. These are database/
+worker checks with a simulated transport, not Apple or Google delivery evidence.
+
 ## Hosted Stripe sandbox identity
 
 `node tests/manual/hosted-stripe-account.mjs` is skipped unless

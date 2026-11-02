@@ -34,6 +34,21 @@ async function action(store,input) {
     const deliver=async subject=>{if(input.fail)throw Object.assign(Error('synthetic outage'),{status:503});await app.audit(null,null,'rehearsal.delivered',subject,{});};
     await new Jobs(store,app,{wallets:{update:deliver},payments:{refund:deliver}}).tick();return {processed:true};
   }
+  if(input.action==='wallet_snapshot_jobs'){
+    let paused=false;
+    const update=async subject=>{
+      const snapshot=await app.membershipSnapshot(subject);
+      if(subject===input.pauseSubject&&!paused){
+        paused=true;process.send({paused:true});
+        const resume=await new Promise(resolve=>process.once('message',resolve));
+        assert.equal(resume.resume,true);
+      }
+      const balance=snapshot.bottles[0]?.remaining_ml??0;
+      await store.run('INSERT INTO rate_limits VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET hits=excluded.hits',`rehearsal_wallet_balance_${subject}`,balance,input.now+3_600_000);
+      await app.audit(null,null,'rehearsal.wallet_snapshot',subject,{balance});
+    };
+    await new Jobs(store,app,{wallets:{update},payments:{}}).tick();return {processed:true};
+  }
   throw Error('Unknown rehearsal action');
 }
 async function worker(config) {
@@ -64,6 +79,23 @@ async function race(inputs) {
     await Promise.all(children.map(child=>child.exitCode!==null?Promise.resolve():new Promise(resolve=>child.once('exit',resolve))));
     return result;
   } finally {for(const child of children)if(child.exitCode===null)child.kill('SIGKILL');}
+}
+async function withPausedWallet(input,during) {
+  const child=fork(fileURLToPath(import.meta.url),['--worker'],{stdio:['ignore','ignore','ignore','ipc']});
+  const exited=new Promise(resolve=>child.once('exit',resolve));
+  const message=()=>new Promise((resolve,reject)=>{
+    const finish=(error,value)=>{clearTimeout(timeout);child.off('message',received);child.off('error',failed);child.off('exit',stopped);error?reject(error):resolve(value);};
+    const received=value=>finish(null,value),failed=()=>finish(Error('Paused worker failed')),stopped=()=>finish(Error('Paused worker exited early'));
+    const timeout=setTimeout(()=>finish(Error('Paused worker timed out')),30_000);
+    child.once('message',received);child.once('error',failed);child.once('exit',stopped);
+  });
+  try {
+    assert.equal((await message()).ready,true);
+    const pause=message();child.send(input);assert.equal((await pause).paused,true);
+    await during();
+    const completed=message();child.send({resume:true});assert.equal((await completed).ok,true);
+    assert.equal(await exited,0);
+  } finally {if(child.exitCode===null)child.kill('SIGKILL');await exited;}
 }
 async function snapshot(store){const rows={};for(const table of tables)rows[table]=await store.all(`SELECT * FROM ${schema}.${table}`);return rows;}
 function canonical(rows){return Object.fromEntries(tables.map(table=>[table,rows[table].map(row=>JSON.stringify(row)).sort()]));}
@@ -106,6 +138,37 @@ async function run(config) {
     step='expired worker lease recovery';results=await race([{action:'jobs',now}]);assert.ok(results[0].ok);assert.equal((await store.get("SELECT count(*) n FROM audit WHERE action='rehearsal.delivered'")).n,2);pass(step);
     await store.run("UPDATE outbox SET status='pending' WHERE id=?",job.id);
     step='delivery outage and retry recovery';await race([{action:'jobs',now,fail:true}]);assert.equal((await store.get('SELECT attempts FROM outbox WHERE id=?',job.id)).attempts,1);await race([{action:'jobs',now:now+60001}]);assert.equal((await store.get('SELECT status FROM outbox WHERE id=?',job.id)).status,'done');pass(step);
+    step='slow Wallet snapshot ordering';
+    // The first process reads an old snapshot, then pauses before simulated delivery.
+    // A second process must leave this member queued while updating someone else.
+    const otherOrder=await app.createOrder('hosted_guest_b',{kind:'membership',venueId:'v_copper',planId:'v_copper_shared'},'hosted-other-member');
+    await app.settle({eventId:'synthetic_hosted_other_paid',orderId:otherOrder.id,amount:otherOrder.amount_cents,currency:'usd',paymentIntent:'synthetic_hosted_other_payment'});
+    const otherMember=(await app.account('hosted_guest_b')).memberships[0];
+    const currentManager=(await store.get("SELECT user_id FROM staff WHERE venue_id='v_copper' AND role='manager'")).user_id;
+    await store.run("UPDATE outbox SET status='done'");
+    await app.adjustBottle(currentManager,bottle.id,{deltaMl:-10,reason:'Synthetic first update'},'snapshot-first');
+    await withPausedWallet({action:'wallet_snapshot_jobs',pauseSubject:membership.id,now},async()=>{
+      await app.adjustBottle(currentManager,bottle.id,{deltaMl:-10,reason:'Synthetic second update'},'snapshot-second');
+      await app.touch(otherMember.id);
+      const delivered=await race([{action:'wallet_snapshot_jobs',now}]);assert.ok(delivered[0].ok);
+      assert.equal((await store.get("SELECT count(*) n FROM audit WHERE action='rehearsal.wallet_snapshot' AND subject_id=?",membership.id)).n,0);
+      assert.equal((await store.get("SELECT count(*) n FROM audit WHERE action='rehearsal.wallet_snapshot' AND subject_id=?",otherMember.id)).n,1);
+    });
+    const snapshots=await store.all("SELECT detail FROM audit WHERE action='rehearsal.wallet_snapshot' AND subject_id=?",membership.id);
+    assert.deepEqual(snapshots.map(row=>JSON.parse(row.detail).balance).sort((a,b)=>a-b),[140,150]);
+    assert.equal((await store.get('SELECT hits FROM rate_limits WHERE key=?',`rehearsal_wallet_balance_${membership.id}`)).hits,140);
+    assert.equal((await store.get("SELECT count(*) n FROM outbox WHERE status='pending'")).n,0);pass(step);
+    step='subject lease expiration recovery';
+    await app.enqueue('wallet',membership.id);
+    const heldJob=await store.get("SELECT id FROM outbox WHERE status='pending'");
+    await store.run('INSERT INTO job_leases VALUES(?,?,?)',heldJob.id,'subject-stalled-worker',now+300_000);
+    await app.enqueue('wallet',membership.id);
+    await race([{action:'wallet_snapshot_jobs',now}]);
+    assert.equal((await store.get("SELECT count(*) n FROM outbox WHERE status='pending'")).n,2);
+    await race([{action:'wallet_snapshot_jobs',now:now+300_000}]);
+    assert.equal((await store.get("SELECT count(*) n FROM outbox WHERE status='pending'")).n,0);
+    assert.equal((await store.get('SELECT count(*) n FROM job_leases')).n,0);pass(step);
+    await app.adjustBottle(currentManager,bottle.id,{deltaMl:20,reason:'Restore synthetic snapshot baseline'},'snapshot-restore');
     step='logical snapshot and restore';const saved=await snapshot(store);await restore(store,saved);assert.deepEqual(canonical(await snapshot(store)),canonical(saved));assert.equal((await app.membershipSnapshot(membership.id)).bottles[0].remaining_ml,160);pass(step);
     step='provider schema unchanged';assert.deepEqual(await protectedCounts(store),baseline);pass(step);
   } catch {throw Error(`Hosted rehearsal failed at: ${step}`);}
