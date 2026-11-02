@@ -1,5 +1,11 @@
 # Implementation and verification status
 
+## November 1 — prevent stale Wallet delivery under concurrent service
+
+Found and fixed a real worker race: different outbox jobs for one member could run concurrently, allowing an older Wallet snapshot to finish last. The regression reproduced two 45 mL pours leaving the simulated provider at 705 mL instead of 660 mL, while database stock stayed correct. Claims now skip a delivery kind/subject with an active lease; other members/kinds proceed, and lease expiration still permits recovery. No schema or dependency change was needed.
+
+Both new regressions pass on SQLite and PostgreSQL/PGlite. The full local suite passes 169 tests, with 100% runtime line/branch/function coverage across 22 files. GitHub CI run `41368413669` passed, including the full PostgreSQL/PGlite suite. Fourteen hosted Supabase checks pass with independent processes/pools, including slow snapshot ordering and subject-lease expiry. Preview `e8fb2210a0136127e63e50ca5d129365fb8305e1` is READY. Fixture cleanup was independently verified, and the rehearsal flag is disabled. Actual Wallet/device delivery remains unverified; production was not promoted. See [the reproduced failure, fix and scoped evidence](WALLET_DELIVERY_ORDERING_2026-11-01.md).
+
 ## November 1 — hosted Supabase contention/recovery and Stripe identity
 
 Twelve new hosted checks passed against a disposable private Supabase schema from a Vercel Preview build. Independent Node processes and PostgreSQL pools exercised booking/checkout races, stock retries/overdraw, synthetic Square matching, transaction rollback, last-manager protection, leased delivery jobs, expired leases, outage/retry recovery and logical snapshot restoration. All fixture rows were removed; a separate database query confirmed zero business rows in both provider and rehearsal schemas. The provider-schema row counts were unchanged. The rehearsal flag is now disabled. This verifies domain/database behavior over the hosted TLS pooler, not public HTTP, multiple serverless invocations, actual provider deliveries or retained disaster-recovery backups.
